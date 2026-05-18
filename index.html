@@ -301,8 +301,16 @@
     </div>
     <div class="row">
       <div style="flex:1">
+        <label for="length">Total timelapse length</label>
+        <div class="desc" id="length-desc">Leave blank to keep the original length</div>
+      </div>
+      <input type="number" id="length" min="0.5" max="3600" step="0.1" placeholder="auto">
+      <span class="unit">sec</span>
+    </div>
+    <div class="row">
+      <div style="flex:1">
         <label for="hold">Hold final frame</label>
-        <div class="desc">How long to freeze on the finished piece at the end</div>
+        <div class="desc">Added on top of the timelapse length above</div>
       </div>
       <input type="number" id="hold" min="0" max="60" step="0.5" value="4">
       <span class="unit">sec</span>
@@ -432,7 +440,33 @@
       ? "Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join."
       : 'Add a clean flash and a final hold to a timelapse that does not already have a built-in flash.';
     $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
+    updateLengthDesc();
   }
+
+  function getOriginalDur() {
+    if (!state.file1) return 0;
+    if (state.tab === 'splice') {
+      const trim = parseFloat($('trim').value) || 0;
+      const trimmed = Math.max(0.1, state.duration1 - trim);
+      return trimmed + (state.file2 ? state.duration2 : 0);
+    }
+    return state.duration1;
+  }
+
+  function updateLengthDesc() {
+    const orig = getOriginalDur();
+    const input = $('length');
+    if (orig > 0) {
+      const rounded = orig.toFixed(1);
+      $('length-desc').textContent = `Original: ${rounded}s — leave blank to keep it`;
+      input.placeholder = rounded;
+    } else {
+      $('length-desc').textContent = 'Leave blank to keep the original length';
+      input.placeholder = 'auto';
+    }
+  }
+
+  $('trim').addEventListener('input', updateLengthDesc);
 
   setupDrop('drop1', 'file1', 'info1', 'file1');
   setupDrop('drop2', 'file2', 'info2', 'file2');
@@ -513,6 +547,10 @@
     const trim = hasSecond ? (parseFloat($('trim').value) || 0) : 0;
     const hold = parseFloat($('hold').value) || 0;
     const addFlash = $('flash').checked;
+    const targetLen = parseFloat($('length').value);
+    const origDur = getOriginalDur();
+    const speedFactor = (targetLen > 0 && origDur > 0) ? (targetLen / origDur) : 1;
+    const setpts = speedFactor === 1 ? '' : `setpts=PTS*${speedFactor.toFixed(6)},`;
 
     try {
       // determine target dims/fps from video 1
@@ -533,7 +571,7 @@
       await ffmpeg.run(
         '-i', 'in1.mp4',
         '-t', trimmedDur.toFixed(3),
-        '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+        '-vf', `${setpts}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
         '-an',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
         'p1.mp4'
@@ -546,7 +584,7 @@
         setProgress('Normalizing second video…', 35);
         await ffmpeg.run(
           '-i', 'in2.mp4',
-          '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+          '-vf', `${setpts}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
           '-an',
           '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
           'p2.mp4'
@@ -554,9 +592,9 @@
         parts.push('p2.mp4');
       }
 
-      // extract last frame from the final clip, reused by flash and/or hold
+      // extract last frame from original-timed source so speed-change doesn't shift the seek
       if (addFlash || hold > 0) {
-        const lastSrc = hasSecond ? 'in2.mp4' : 'p1.mp4';
+        const lastSrc = hasSecond ? 'in2.mp4' : 'in1.mp4';
         const lastSrcDur = hasSecond ? state.duration2 : trimmedDur;
         const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
         await ffmpeg.run(
