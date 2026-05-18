@@ -212,7 +212,7 @@
 <body>
 <div class="container">
   <h1>Timelapse Splicer</h1>
-  <p class="sub">Splice a Clip Studio Paint timelapse together with a Photoshop one, or process just one video to swap CSP's built-in flash for a cleaner one with a final hold.</p>
+  <p class="sub">Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join. Or process just one timelapse (without a flash already) to add a flash and final hold.</p>
 
   <div class="card">
     <h2><span class="step">1</span>First video (e.g. Clip Studio Paint)</h2>
@@ -231,11 +231,11 @@
   </div>
 
   <div class="card">
-    <h2><span class="step">3</span>Trim & extend</h2>
-    <div class="row">
+    <h2><span class="step">3</span>Finish</h2>
+    <div class="row" id="trim-row" style="display:none">
       <div style="flex:1">
         <label for="trim">Cut from end of first video</label>
-        <div class="desc">Removes the CSP final-flash so it doesn't show mid-splice</div>
+        <div class="desc">Removes CSP's built-in final flash so it doesn't show mid-splice</div>
       </div>
       <input type="number" id="trim" min="0" max="30" step="0.1" value="2">
       <span class="unit">sec</span>
@@ -317,8 +317,13 @@
       const sizeMB = (file.size / 1024 / 1024).toFixed(1);
       info.innerHTML = `<div class="filename">${file.name}</div><div class="meta">${dur.toFixed(1)}s · ${sizeMB} MB</div>`;
       URL.revokeObjectURL(url);
+      updateModeUI();
       checkReady();
     };
+  }
+
+  function updateModeUI() {
+    $('trim-row').style.display = state.file2 ? '' : 'none';
   }
 
   setupDrop('drop1', 'file1', 'info1', 'file1');
@@ -383,7 +388,8 @@
     $('result').style.display = 'none';
     $('go').disabled = true;
 
-    const trim = parseFloat($('trim').value) || 0;
+    const hasSecond = !!state.file2;
+    const trim = hasSecond ? (parseFloat($('trim').value) || 0) : 0;
     const hold = parseFloat($('hold').value) || 0;
     const addFlash = $('flash').checked;
 
@@ -392,8 +398,6 @@
       const probe = await getVideoProps(state.file1);
       const W = probe.width, H = probe.height;
       const FPS = 30; // normalize for consistent splicing
-
-      const hasSecond = !!state.file2;
 
       setProgress('Reading first video…', 5);
       ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
