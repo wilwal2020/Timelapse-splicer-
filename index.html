@@ -267,10 +267,16 @@
   <p class="footnote">Everything runs locally in your browser — no uploads.</p>
 </div>
 
-<script src="https://unpkg.com/@ffmpeg/[email protected]/dist/ffmpeg.min.js"></script>
+<script src="https://cdn.jsdelivr.net/gh/gzuidhof/coi-serviceworker@v0.1.7/coi-serviceworker.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/[email protected]/dist/ffmpeg.min.js"></script>
 <script>
+  if (typeof FFmpeg === 'undefined') {
+    document.getElementById('error').textContent =
+      'Could not load FFmpeg from CDN. Disable any ad blocker / privacy extension on this page and reload.';
+    throw new Error('FFmpeg CDN script failed to load');
+  }
   const { createFFmpeg, fetchFile } = FFmpeg;
-  const ffmpeg = createFFmpeg({ log: false, corePath: 'https://unpkg.com/@ffmpeg/[email protected]/dist/ffmpeg-core.js' });
+  const ffmpeg = createFFmpeg({ log: false, corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/[email protected]/dist/ffmpeg-core.js' });
 
   const state = { file1: null, file2: null, duration1: 0, duration2: 0 };
   const $ = id => document.getElementById(id);
