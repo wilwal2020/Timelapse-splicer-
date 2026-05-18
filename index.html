@@ -569,8 +569,8 @@
       const trimmedDur = Math.max(0.1, state.duration1 - trim);
       setProgress('Trimming first video…', 15);
       await ffmpeg.run(
-        '-i', 'in1.mp4',
         '-t', trimmedDur.toFixed(3),
+        '-i', 'in1.mp4',
         '-vf', `${setpts}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
         '-an',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
