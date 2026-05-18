@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Timelapse Splicer</title>
+<style>
+  :root {
+    --bg: #1a1f2e;
+    --surface: #242b3d;
+    --surface-2: #2d3548;
+    --border: #3a4258;
+    --text: #e8ebf3;
+    --text-dim: #9ba3b8;
+    --accent: #6b8afd;
+    --accent-hover: #819afd;
+    --success: #4ade80;
+    --danger: #f87171;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 32px 20px;
+    min-height: 100vh;
+  }
+  .container { max-width: 720px; margin: 0 auto; }
+  h1 {
+    font-size: 24px;
+    font-weight: 500;
+    margin: 0 0 8px;
+  }
+  .sub {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 0 0 28px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 15px;
+    font-weight: 500;
+    margin: 0 0 14px;
+    color: var(--text);
+  }
+  .card h2 .step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 50%;
+    font-size: 12px;
+    margin-right: 10px;
+  }
+  .drop {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+  .drop:hover, .drop.over {
+    border-color: var(--accent);
+    background: var(--surface-2);
+  }
+  .drop.loaded {
+    border-style: solid;
+    border-color: var(--success);
+    color: var(--text);
+    background: var(--surface-2);
+  }
+  .drop input { display: none; }
+  .filename {
+    font-weight: 500;
+    word-break: break-all;
+  }
+  .meta {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+  .row label {
+    flex: 1;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .row .desc {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+  input[type=range] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  input[type=number] {
+    width: 70px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  input[type=number]:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .unit { color: var(--text-dim); font-size: 13px; }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+  .checkbox-row input { accent-color: var(--accent); }
+  .checkbox-row label { font-size: 14px; cursor: pointer; }
+  button.primary {
+    width: 100%;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 14px;
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: background 0.15s;
+    font-family: inherit;
+  }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.primary:disabled {
+    background: var(--surface-2);
+    color: var(--text-dim);
+    cursor: not-allowed;
+  }
+  .progress {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--text-dim);
+    min-height: 18px;
+  }
+  .bar {
+    height: 4px;
+    background: var(--surface-2);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 8px;
+  }
+  .bar > div {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.2s;
+  }
+  .result {
+    display: none;
+    margin-top: 16px;
+    padding: 14px;
+    background: var(--surface-2);
+    border-radius: 8px;
+  }
+  .result video {
+    width: 100%;
+    border-radius: 6px;
+    background: #000;
+    margin-bottom: 10px;
+  }
+  .result a {
+    display: inline-block;
+    background: var(--success);
+    color: #0a1f0e;
+    padding: 8px 14px;
+    border-radius: 6px;
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 14px;
+  }
+  .error {
+    color: var(--danger);
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .footnote {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Timelapse Splicer</h1>
+  <p class="sub">Splice a Clip Studio Paint timelapse together with a Photoshop one. Cut the flash off the first, add a flash and hold to the second.</p>
+
+  <div class="card">
+    <h2><span class="step">1</span>First video (e.g. Clip Studio Paint)</h2>
+    <div class="drop" id="drop1">
+      <input type="file" id="file1" accept="video/*">
+      <div id="info1">Click to choose or drag a video here</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">2</span>Second video (e.g. Photoshop)</h2>
+    <div class="drop" id="drop2">
+      <input type="file" id="file2" accept="video/*">
+      <div id="info2">Click to choose or drag a video here</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2><span class="step">3</span>Trim & extend</h2>
+    <div class="row">
+      <div style="flex:1">
+        <label for="trim">Cut from end of first video</label>
+        <div class="desc">Removes the CSP final-flash so it doesn't show mid-splice</div>
+      </div>
+      <input type="number" id="trim" min="0" max="30" step="0.1" value="1.5">
+      <span class="unit">sec</span>
+    </div>
+    <div class="row">
+      <div style="flex:1">
+        <label for="hold">Hold final frame</label>
+        <div class="desc">How long to freeze on the finished piece at the end</div>
+      </div>
+      <input type="number" id="hold" min="0" max="60" step="0.5" value="4">
+      <span class="unit">sec</span>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="flash" checked>
+      <label for="flash">Add a CSP-style flash before the final hold</label>
+    </div>
+  </div>
+
+  <button class="primary" id="go" disabled>Loading FFmpeg…</button>
+  <div class="progress" id="progress"></div>
+  <div class="bar"><div id="barfill"></div></div>
+  <div class="error" id="error"></div>
+
+  <div class="result" id="result">
+    <video id="preview" controls></video>
+    <a id="dl" download="timelapse-spliced.mp4">Download</a>
+  </div>
+
+  <p class="footnote">Everything runs locally in your browser — no uploads.</p>
+</div>
+
+<script src="https://unpkg.com/@ffmpeg/[email protected]/dist/ffmpeg.min.js"></script>
+<script>
+  const { createFFmpeg, fetchFile } = FFmpeg;
+  const ffmpeg = createFFmpeg({ log: false, corePath: 'https://unpkg.com/@ffmpeg/[email protected]/dist/ffmpeg-core.js' });
+
+  const state = { file1: null, file2: null, duration1: 0, duration2: 0 };
+  const $ = id => document.getElementById(id);
+
+  function setupDrop(dropId, inputId, infoId, key) {
+    const drop = $(dropId), input = $(inputId), info = $(infoId);
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => {
+      e.preventDefault();
+      drop.classList.remove('over');
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0], drop, info, key);
+    });
+    input.addEventListener('change', e => {
+      if (e.target.files[0]) handleFile(e.target.files[0], drop, info, key);
+    });
+  }
+
+  function handleFile(file, drop, info, key) {
+    state[key] = file;
+    drop.classList.add('loaded');
+    // probe duration
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.src = url;
+    v.onloadedmetadata = () => {
+      const dur = v.duration;
+      state[key === 'file1' ? 'duration1' : 'duration2'] = dur;
+      const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+      info.innerHTML = `<div class="filename">${file.name}</div><div class="meta">${dur.toFixed(1)}s · ${sizeMB} MB</div>`;
+      URL.revokeObjectURL(url);
+      checkReady();
+    };
+  }
+
+  setupDrop('drop1', 'file1', 'info1', 'file1');
+  setupDrop('drop2', 'file2', 'info2', 'file2');
+
+  function checkReady() {
+    const go = $('go');
+    if (state.file1 && state.file2 && ffmpeg.isLoaded()) {
+      go.disabled = false;
+      go.textContent = 'Splice videos';
+    }
+  }
+
+  function setProgress(text, pct) {
+    $('progress').textContent = text;
+    if (pct !== undefined) $('barfill').style.width = pct + '%';
+  }
+
+  (async () => {
+    setProgress('Loading FFmpeg (one-time, ~25MB)…');
+    try {
+      await ffmpeg.load();
+      $('go').textContent = state.file1 && state.file2 ? 'Splice videos' : 'Choose both videos to begin';
+      setProgress('Ready.');
+      checkReady();
+    } catch (e) {
+      setProgress('');
+      $('error').textContent = 'Failed to load FFmpeg: ' + e.message;
+    }
+  })();
+
+  ffmpeg.setProgress(({ ratio }) => {
+    if (ratio >= 0 && ratio <= 1) setProgress(`Processing… ${Math.round(ratio * 100)}%`, ratio * 100);
+  });
+
+  $('go').addEventListener('click', async () => {
+    $('error').textContent = '';
+    $('result').style.display = 'none';
+    $('go').disabled = true;
+
+    const trim = parseFloat($('trim').value) || 0;
+    const hold = parseFloat($('hold').value) || 0;
+    const addFlash = $('flash').checked;
+
+    try {
+      // determine target dims/fps from video 1
+      const probe = await getVideoProps(state.file1);
+      const W = probe.width, H = probe.height;
+      const FPS = 30; // normalize for consistent splicing
+
+      setProgress('Reading first video…', 5);
+      ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
+      setProgress('Reading second video…', 10);
+      ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
+
+      // 1) trim end of first video, normalize
+      const trimmedDur = Math.max(0.1, state.duration1 - trim);
+      setProgress('Trimming first video…', 15);
+      await ffmpeg.run(
+        '-i', 'in1.mp4',
+        '-t', trimmedDur.toFixed(3),
+        '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+        '-an',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+        'p1.mp4'
+      );
+
+      // 2) normalize second video
+      setProgress('Normalizing second video…', 35);
+      await ffmpeg.run(
+        '-i', 'in2.mp4',
+        '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+        '-an',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+        'p2.mp4'
+      );
+
+      const parts = ['p1.mp4', 'p2.mp4'];
+
+      // 3) flash (white frame ~0.08s then ~0.12s fade) — generated as a clip
+      if (addFlash) {
+        setProgress('Building flash…', 55);
+        // 0.2s total: 0.08s solid white, then 0.12s fade to black
+        await ffmpeg.run(
+          '-f', 'lavfi', '-i', `color=c=white:s=${W}x${H}:r=${FPS}:d=0.2`,
+          '-vf', `fade=t=out:st=0.08:d=0.12:c=white,setsar=1`,
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          'flash.mp4'
+        );
+        parts.push('flash.mp4');
+      }
+
+      // 4) extract last frame of second video, build a hold clip
+      if (hold > 0) {
+        setProgress('Building final hold…', 70);
+        // grab last frame
+        const lastFrameTime = Math.max(0, state.duration2 - 0.05);
+        await ffmpeg.run(
+          '-ss', lastFrameTime.toFixed(3),
+          '-i', 'in2.mp4',
+          '-frames:v', '1',
+          'last.png'
+        );
+        // build clip of that frame for `hold` seconds
+        await ffmpeg.run(
+          '-loop', '1', '-i', 'last.png',
+          '-t', hold.toFixed(3),
+          '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          'hold.mp4'
+        );
+        parts.push('hold.mp4');
+      }
+
+      // 5) concat
+      setProgress('Splicing…', 85);
+      const concatList = parts.map(p => `file '${p}'`).join('\n');
+      ffmpeg.FS('writeFile', 'list.txt', new TextEncoder().encode(concatList));
+      await ffmpeg.run(
+        '-f', 'concat', '-safe', '0',
+        '-i', 'list.txt',
+        '-c', 'copy',
+        'out.mp4'
+      );
+
+      setProgress('Done.', 100);
+
+      const data = ffmpeg.FS('readFile', 'out.mp4');
+      const blob = new Blob([data.buffer], { type: 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      $('preview').src = url;
+      $('dl').href = url;
+      $('result').style.display = 'block';
+
+      // cleanup
+      ['in1.mp4','in2.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
+        try { ffmpeg.FS('unlink', f); } catch {}
+      });
+    } catch (e) {
+      $('error').textContent = 'Error: ' + (e.message || e);
+      setProgress('');
+    } finally {
+      $('go').disabled = false;
+    }
+  });
+
+  function getVideoProps(file) {
+    return new Promise((resolve, reject) => {
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      v.src = URL.createObjectURL(file);
+      v.onloadedmetadata = () => {
+        resolve({ width: v.videoWidth, height: v.videoHeight, duration: v.duration });
+        URL.revokeObjectURL(v.src);
+      };
+      v.onerror = () => reject(new Error('Could not read video metadata'));
+    });
+  }
+</script>
+</body>
+</html>
