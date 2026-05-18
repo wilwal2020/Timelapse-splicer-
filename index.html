@@ -212,7 +212,7 @@
 <body>
 <div class="container">
   <h1>Timelapse Splicer</h1>
-  <p class="sub">Splice a Clip Studio Paint timelapse together with a Photoshop one. Cut the flash off the first, add a flash and hold to the second.</p>
+  <p class="sub">Splice a Clip Studio Paint timelapse together with a Photoshop one, or process just one video to swap CSP's built-in flash for a cleaner one with a final hold.</p>
 
   <div class="card">
     <h2><span class="step">1</span>First video (e.g. Clip Studio Paint)</h2>
@@ -223,10 +223,10 @@
   </div>
 
   <div class="card">
-    <h2><span class="step">2</span>Second video (e.g. Photoshop)</h2>
+    <h2><span class="step">2</span>Second video <span style="color:var(--text-dim);font-weight:normal">— optional (e.g. Photoshop)</span></h2>
     <div class="drop" id="drop2">
       <input type="file" id="file2" accept="video/*">
-      <div id="info2">Click to choose or drag a video here</div>
+      <div id="info2">Skip this to just process the first video</div>
     </div>
   </div>
 
@@ -326,9 +326,11 @@
 
   function checkReady() {
     const go = $('go');
-    if (state.file1 && state.file2 && ffmpeg && ffmpeg.isLoaded()) {
+    if (state.file1 && ffmpeg && ffmpeg.isLoaded()) {
       go.disabled = false;
-      go.textContent = 'Splice videos';
+      go.textContent = state.file2 ? 'Splice videos' : 'Process video';
+    } else {
+      go.disabled = true;
     }
   }
 
@@ -365,7 +367,9 @@
     setProgress('Loading FFmpeg core (~25MB)…');
     try {
       await ffmpeg.load();
-      $('go').textContent = state.file1 && state.file2 ? 'Splice videos' : 'Choose both videos to begin';
+      $('go').textContent = state.file1
+        ? (state.file2 ? 'Splice videos' : 'Process video')
+        : 'Choose a video to begin';
       setProgress('Ready.');
       checkReady();
     } catch (e) {
@@ -389,10 +393,14 @@
       const W = probe.width, H = probe.height;
       const FPS = 30; // normalize for consistent splicing
 
+      const hasSecond = !!state.file2;
+
       setProgress('Reading first video…', 5);
       ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
-      setProgress('Reading second video…', 10);
-      ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
+      if (hasSecond) {
+        setProgress('Reading second video…', 10);
+        ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
+      }
 
       // 1) trim end of first video, normalize
       const trimmedDur = Math.max(0.1, state.duration1 - trim);
@@ -406,24 +414,29 @@
         'p1.mp4'
       );
 
-      // 2) normalize second video
-      setProgress('Normalizing second video…', 35);
-      await ffmpeg.run(
-        '-i', 'in2.mp4',
-        '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
-        '-an',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-        'p2.mp4'
-      );
+      const parts = ['p1.mp4'];
 
-      const parts = ['p1.mp4', 'p2.mp4'];
+      // 2) normalize second video (if any)
+      if (hasSecond) {
+        setProgress('Normalizing second video…', 35);
+        await ffmpeg.run(
+          '-i', 'in2.mp4',
+          '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+          '-an',
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          'p2.mp4'
+        );
+        parts.push('p2.mp4');
+      }
 
-      // extract last frame once, reused by flash and/or hold
+      // extract last frame from the final clip, reused by flash and/or hold
       if (addFlash || hold > 0) {
-        const lastFrameTime = Math.max(0, state.duration2 - 0.05);
+        const lastSrc = hasSecond ? 'in2.mp4' : 'p1.mp4';
+        const lastSrcDur = hasSecond ? state.duration2 : trimmedDur;
+        const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
         await ffmpeg.run(
           '-ss', lastFrameTime.toFixed(3),
-          '-i', 'in2.mp4',
+          '-i', lastSrc,
           '-frames:v', '1',
           'last.png'
         );
