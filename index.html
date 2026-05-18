@@ -237,7 +237,7 @@
         <label for="trim">Cut from end of first video</label>
         <div class="desc">Removes the CSP final-flash so it doesn't show mid-splice</div>
       </div>
-      <input type="number" id="trim" min="0" max="30" step="0.1" value="1.5">
+      <input type="number" id="trim" min="0" max="30" step="0.1" value="2">
       <span class="unit">sec</span>
     </div>
     <div class="row">
@@ -418,23 +418,8 @@
 
       const parts = ['p1.mp4', 'p2.mp4'];
 
-      // 3) flash (white frame ~0.08s then ~0.12s fade) — generated as a clip
-      if (addFlash) {
-        setProgress('Building flash…', 55);
-        // 0.2s total: 0.08s solid white, then 0.12s fade to black
-        await ffmpeg.run(
-          '-f', 'lavfi', '-i', `color=c=white:s=${W}x${H}:r=${FPS}:d=0.2`,
-          '-vf', `fade=t=out:st=0.08:d=0.12:c=white,setsar=1`,
-          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-          'flash.mp4'
-        );
-        parts.push('flash.mp4');
-      }
-
-      // 4) extract last frame of second video, build a hold clip
-      if (hold > 0) {
-        setProgress('Building final hold…', 70);
-        // grab last frame
+      // extract last frame once, reused by flash and/or hold
+      if (addFlash || hold > 0) {
         const lastFrameTime = Math.max(0, state.duration2 - 0.05);
         await ffmpeg.run(
           '-ss', lastFrameTime.toFixed(3),
@@ -442,7 +427,29 @@
           '-frames:v', '1',
           'last.png'
         );
-        // build clip of that frame for `hold` seconds
+      }
+
+      // 3) flash: white wash over the finished artwork, fading back to the artwork
+      if (addFlash) {
+        setProgress('Building flash…', 55);
+        await ffmpeg.run(
+          '-loop', '1', '-i', 'last.png',
+          '-f', 'lavfi', '-i', `color=c=white:s=${W}x${H}:r=${FPS}:d=0.45`,
+          '-filter_complex',
+            `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[bg];` +
+            `[1:v]format=yuva444p,fade=t=out:st=0.1:d=0.35:alpha=1[w];` +
+            `[bg][w]overlay,fps=${FPS}`,
+          '-t', '0.45',
+          '-an',
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          'flash.mp4'
+        );
+        parts.push('flash.mp4');
+      }
+
+      // 4) hold clip on the last frame
+      if (hold > 0) {
+        setProgress('Building final hold…', 70);
         await ffmpeg.run(
           '-loop', '1', '-i', 'last.png',
           '-t', hold.toFixed(3),
