@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP: %{http_code}\\\\nFinal URL: %{url_effective}\\\\nContent-Type: %{content_type}\\\\n\" -L https://wilwal2020.github.io/Timelapse-splicer-/)",
+      "Bash(curl -s https://wilwal2020.github.io/Timelapse-splicer-/)",
+      "Bash(curl -sI https://unpkg.com/@ffmpeg/[email protected]/dist/ffmpeg.min.js)",
+      "Bash(curl -sL https://unpkg.com/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js -o /tmp/ff.js)",
+      "Read(//tmp/**)",
+      "Bash(git add *)",
+      "Bash(git -c user.email=\"walvatnewilliam@gmail.com\" -c user.name=\"wilwal2020\" commit -m \"Fix FFmpeg loading: switch to jsdelivr CDN and add coi-serviceworker for SharedArrayBuffer on GitHub Pages\")",
+      "Bash(git push *)",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js\" -o /tmp/ff-jsd.js -w \"HTTP %{http_code} Size %{size_download}\\\\n\")",
+      "Bash(curl -sLI \"https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js\")",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/gh/gzuidhof/coi-serviceworker@v0.1.7/coi-serviceworker.min.js\" -o /tmp/coi.js -w \"HTTP %{http_code} Size %{size_download}\\\\n\")",
+      "Bash(curl -sL \"https://wilwal2020.github.io/Timelapse-splicer-/\" -o /tmp/live.html -w \"HTTP %{http_code}\\\\n\")",
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "Bash(grep -oE \"352:\\\\\\(?.{0,200}\" /tmp/ff-jsd.js)",
+      "Bash(node -e \"global.self=global; require\\('/tmp/ff-jsd.js'\\); console.log\\('FFmpeg:', typeof self.FFmpeg, self.FFmpeg ? Object.keys\\(self.FFmpeg\\) : 'N/A'\\);\")",
+      "Bash(node -e \"global.self=global; require\\('/tmp/ff-jsd.js'\\); console.log\\('FFmpeg:', typeof self.FFmpeg, self.FFmpeg ? Object.keys\\(self.FFmpeg\\) : 'N/A'\\);\" --eval-file=/dev/null)",
+      "Bash(cygpath -w /tmp/ff-jsd.js)",
+      "Bash(node -e \"global.self=global; require\\('$\\(cygpath -w /tmp/ff-jsd.js 2>/dev/null || echo /tmp/ff-jsd.js\\)'\\); console.log\\('FFmpeg type:', typeof self.FFmpeg\\);\")",
+      "Bash(cp /tmp/ff-jsd.js \"C:\\\\BILDER 2\\\\bilder bra\\\\index.html\\\\TimeSplice\\\\.ff-test.js\")",
+      "Bash(node -e \"global.self=global; require\\('./.ff-test.js'\\); console.log\\('FFmpeg type:', typeof self.FFmpeg\\); if \\(self.FFmpeg\\) console.log\\('keys:', Object.keys\\(self.FFmpeg\\)\\);\")",
+      "Bash(curl -sL \"https://cdn.jsdelivr.net/npm/@ffmpeg/[email protected]/dist/ffmpeg.min.js\" -o /tmp/ff116.js -w \"HTTP %{http_code} Size %{size_download}\\\\n\")",
+      "Bash(curl -sL \"https://wilwal2020.github.io/Timelapse-splicer-/\")",
+      "Bash(git -c user.email=\"walvatnewilliam@gmail.com\" -c user.name=\"wilwal2020\" commit -m \"Load FFmpeg dynamically with explicit error reporting; fix coi-serviceworker URL\")",
+      "Bash(curl -sL \"https://unpkg.com/@ffmpeg/[email protected]/dist/\")",
+      "Bash(curl -sL \"https://unpkg.com/browse/@ffmpeg/ffmpeg@0.11.0/dist/\" -o /tmp/dirlist.html -w \"HTTP %{http_code}\\\\n\")",
+      "Bash(curl -sL \"https://unpkg.com/browse/@ffmpeg/core@0.11.0/dist/\" -o /tmp/dirlist2.html)",
+      "Bash(curl -sI \"https://unpkg.com/@ffmpeg/core@0.11.0/dist/ffmpeg-core.wasm\" -L)",
+      "Bash(git -c user.email=\"walvatnewilliam@gmail.com\" -c user.name=\"wilwal2020\" commit -m \"Bundle FFmpeg, coi-serviceworker, and core wasm to avoid CDN blocks and SW same-origin requirement\")",
+      "Bash(git mv *)",
+      "Bash(git -c user.email=\"walvatnewilliam@gmail.com\" -c user.name=\"wilwal2020\" commit -m \"Move coi-serviceworker to repo root so its scope covers the page\")"
+    ]
+  }
+}
