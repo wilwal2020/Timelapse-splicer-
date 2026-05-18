@@ -35,7 +35,34 @@
   .sub {
     color: var(--text-dim);
     font-size: 14px;
-    margin: 0 0 28px;
+    margin: 0 0 20px;
+  }
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px;
+  }
+  .tab {
+    flex: 1;
+    background: transparent;
+    color: var(--text-dim);
+    border: none;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .tab:hover:not(.active) { color: var(--text); }
+  .tab.active {
+    background: var(--surface-2);
+    color: var(--text);
   }
   .card {
     background: var(--surface);
@@ -83,6 +110,31 @@
     background: var(--surface-2);
   }
   .drop input { display: none; }
+  .drop { position: relative; }
+  .drop .remove {
+    display: none;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    font-family: inherit;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+  }
+  .drop .remove:hover {
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
+  }
+  .drop.loaded .remove { display: block; }
   .filename {
     font-weight: 500;
     word-break: break-all;
@@ -212,27 +264,34 @@
 <body>
 <div class="container">
   <h1>Timelapse Splicer</h1>
-  <p class="sub">Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join. Or process just one timelapse (without a flash already) to add a flash and final hold.</p>
+  <p class="sub" id="sub-text">Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join.</p>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="splice" type="button">Splice two videos</button>
+    <button class="tab" data-tab="add" type="button">Add flash &amp; hold</button>
+  </div>
 
   <div class="card">
-    <h2><span class="step">1</span>First video (e.g. Clip Studio Paint)</h2>
+    <h2><span class="step">1</span><span id="card1-title">First video (e.g. Clip Studio Paint)</span></h2>
     <div class="drop" id="drop1">
+      <button class="remove" data-target="file1" type="button" title="Remove video">×</button>
       <input type="file" id="file1" accept="video/*">
       <div id="info1">Click to choose or drag a video here</div>
     </div>
   </div>
 
-  <div class="card">
-    <h2><span class="step">2</span>Second video <span style="color:var(--text-dim);font-weight:normal">— optional (e.g. Photoshop)</span></h2>
+  <div class="card splice-only" id="card-second-video">
+    <h2><span class="step">2</span>Second video (e.g. Photoshop)</h2>
     <div class="drop" id="drop2">
+      <button class="remove" data-target="file2" type="button" title="Remove video">×</button>
       <input type="file" id="file2" accept="video/*">
-      <div id="info2">Skip this to just process the first video</div>
+      <div id="info2">Click to choose or drag a video here</div>
     </div>
   </div>
 
   <div class="card">
-    <h2><span class="step">3</span>Finish</h2>
-    <div class="row" id="trim-row" style="display:none">
+    <h2><span class="step" id="finish-step">3</span>Finish</h2>
+    <div class="row splice-only" id="trim-row">
       <div style="flex:1">
         <label for="trim">Cut from end of first video</label>
         <div class="desc">Removes CSP's built-in final flash so it doesn't show mid-splice</div>
@@ -285,12 +344,20 @@
 
   let ffmpeg = null;
   let fetchFile = null;
-  const state = { file1: null, file2: null, duration1: 0, duration2: 0 };
+  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice' };
   const $ = id => document.getElementById(id);
+
+  const DEFAULT_INFO = {
+    file1: 'Click to choose or drag a video here',
+    file2: 'Click to choose or drag a video here',
+  };
 
   function setupDrop(dropId, inputId, infoId, key) {
     const drop = $(dropId), input = $(inputId), info = $(infoId);
-    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('click', e => {
+      if (e.target.classList.contains('remove')) return;
+      input.click();
+    });
     drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('over'));
     drop.addEventListener('drop', e => {
@@ -302,6 +369,39 @@
       if (e.target.files[0]) handleFile(e.target.files[0], drop, info, key);
     });
   }
+
+  function removeFile(key) {
+    state[key] = null;
+    state[key === 'file1' ? 'duration1' : 'duration2'] = 0;
+    const dropId = key === 'file1' ? 'drop1' : 'drop2';
+    const infoId = key === 'file1' ? 'info1' : 'info2';
+    $(dropId).classList.remove('loaded');
+    $(key).value = '';
+    $(infoId).textContent = DEFAULT_INFO[key];
+    updateModeUI();
+    checkReady();
+  }
+
+  document.querySelectorAll('.remove').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      removeFile(btn.dataset.target);
+    });
+  });
+
+  function setTab(tab) {
+    state.tab = tab;
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === tab);
+    });
+    if (tab === 'add' && state.file2) removeFile('file2');
+    updateModeUI();
+    checkReady();
+  }
+
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => setTab(t.dataset.tab));
+  });
 
   function handleFile(file, drop, info, key) {
     state[key] = file;
@@ -323,19 +423,40 @@
   }
 
   function updateModeUI() {
-    $('trim-row').style.display = state.file2 ? '' : 'none';
+    const splice = state.tab === 'splice';
+    document.querySelectorAll('.splice-only').forEach(el => {
+      el.style.display = splice ? '' : 'none';
+    });
+    $('finish-step').textContent = splice ? '3' : '2';
+    $('sub-text').textContent = splice
+      ? "Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join."
+      : 'Add a clean flash and a final hold to a timelapse that does not already have a built-in flash.';
+    $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
   }
 
   setupDrop('drop1', 'file1', 'info1', 'file1');
   setupDrop('drop2', 'file2', 'info2', 'file2');
+  updateModeUI();
 
   function checkReady() {
     const go = $('go');
-    if (state.file1 && ffmpeg && ffmpeg.isLoaded()) {
-      go.disabled = false;
-      go.textContent = state.file2 ? 'Splice videos' : 'Process video';
+    if (!ffmpeg || !ffmpeg.isLoaded()) { go.disabled = true; return; }
+    if (state.tab === 'splice') {
+      if (state.file1 && state.file2) {
+        go.disabled = false;
+        go.textContent = 'Splice videos';
+      } else {
+        go.disabled = true;
+        go.textContent = state.file1 ? 'Choose second video' : 'Choose two videos';
+      }
     } else {
-      go.disabled = true;
+      if (state.file1) {
+        go.disabled = false;
+        go.textContent = 'Add flash & hold';
+      } else {
+        go.disabled = true;
+        go.textContent = 'Choose a video';
+      }
     }
   }
 
