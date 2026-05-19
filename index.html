@@ -377,7 +377,7 @@
 
   let ffmpeg = null;
   let fetchFile = null;
-  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice' };
+  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false };
   const $ = id => document.getElementById(id);
 
   const DEFAULT_INFO = {
@@ -408,8 +408,10 @@
     state[key === 'file1' ? 'duration1' : 'duration2'] = 0;
     const dropId = key === 'file1' ? 'drop1' : 'drop2';
     const infoId = key === 'file1' ? 'info1' : 'info2';
+    const lengthId = key === 'file1' ? 'length1' : 'length2';
     $(dropId).classList.remove('loaded');
     $(key).value = '';
+    $(lengthId).value = '';
     $(infoId).textContent = DEFAULT_INFO[key];
     updateModeUI();
     checkReady();
@@ -481,13 +483,13 @@
     const l2 = parseFloat($('length2').value);
 
     let target1, target2;
-    if (total > 0 && hasSecond) {
+    if (state.totalDirty && total > 0 && hasSecond) {
       const w1 = l1 > 0 ? l1 : orig1;
       const w2 = l2 > 0 ? l2 : orig2;
       const sumW = w1 + w2 || 1;
       target1 = total * w1 / sumW;
       target2 = total * w2 / sumW;
-    } else if (total > 0) {
+    } else if (state.totalDirty && total > 0) {
       target1 = total;
       target2 = 0;
     } else {
@@ -505,6 +507,7 @@
     if (!state.file1) {
       $('length-desc').textContent = 'Leave blank to keep the original length';
       $('length').placeholder = 'auto';
+      if (!state.totalDirty) $('length').value = '';
       $('length1-desc').textContent = 'Original: —';
       $('length2-desc').textContent = 'Original: —';
       $('length1').placeholder = 'auto';
@@ -512,9 +515,14 @@
       return;
     }
 
-    const totalHint = splice && r.hasSecond ? ' — leave blank to use values below' : ' — leave blank to keep it';
+    const totalHint = state.totalDirty
+      ? ' — clear to use the values below'
+      : (splice && r.hasSecond ? ' — auto from values below; type to override' : ' — leave blank to keep it');
     $('length-desc').textContent = `Original: ${r.totalOrig.toFixed(1)}s${totalHint}`;
     $('length').placeholder = r.totalOrig.toFixed(1);
+    if (!state.totalDirty) {
+      $('length').value = (r.target1 + r.target2).toFixed(1);
+    }
 
     $('length1-desc').textContent = `Original: ${r.orig1.toFixed(1)}s`;
     $('length1').placeholder = r.orig1.toFixed(1);
@@ -528,7 +536,11 @@
     }
   }
 
-  ['trim', 'length', 'length1', 'length2'].forEach(id => {
+  $('length').addEventListener('input', e => {
+    state.totalDirty = e.target.value !== '';
+    updateLengthDesc();
+  });
+  ['trim', 'length1', 'length2'].forEach(id => {
     $(id).addEventListener('input', updateLengthDesc);
   });
 
