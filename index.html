@@ -179,6 +179,15 @@
     border-color: var(--accent);
   }
   .unit { color: var(--text-dim); font-size: 13px; }
+  .row.sub {
+    margin-left: 24px;
+    padding-left: 14px;
+    border-left: 2px solid var(--border);
+    margin-top: -4px;
+    margin-bottom: 8px;
+  }
+  .row.sub label { font-size: 13px; color: var(--text-dim); }
+  .row.sub .desc { font-size: 11px; }
   .checkbox-row {
     display: flex;
     align-items: center;
@@ -305,6 +314,22 @@
         <div class="desc" id="length-desc">Leave blank to keep the original length</div>
       </div>
       <input type="number" id="length" min="0.5" max="3600" step="0.1" placeholder="auto">
+      <span class="unit">sec</span>
+    </div>
+    <div class="row sub splice-only">
+      <div style="flex:1">
+        <label for="length1">First video</label>
+        <div class="desc" id="length1-desc">Original: —</div>
+      </div>
+      <input type="number" id="length1" min="0.5" max="3600" step="0.1" placeholder="auto">
+      <span class="unit">sec</span>
+    </div>
+    <div class="row sub splice-only">
+      <div style="flex:1">
+        <label for="length2">Second video</label>
+        <div class="desc" id="length2-desc">Original: —</div>
+      </div>
+      <input type="number" id="length2" min="0.5" max="3600" step="0.1" placeholder="auto">
       <span class="unit">sec</span>
     </div>
     <div class="row">
@@ -443,30 +468,69 @@
     updateLengthDesc();
   }
 
-  function getOriginalDur() {
-    if (!state.file1) return 0;
-    if (state.tab === 'splice') {
-      const trim = parseFloat($('trim').value) || 0;
-      const trimmed = Math.max(0.1, state.duration1 - trim);
-      return trimmed + (state.file2 ? state.duration2 : 0);
+  function resolveLengths() {
+    const splice = state.tab === 'splice';
+    const hasSecond = splice && !!state.file2;
+    const trim = splice ? (parseFloat($('trim').value) || 0) : 0;
+    const orig1 = state.file1 ? Math.max(0.1, state.duration1 - trim) : 0;
+    const orig2 = hasSecond ? state.duration2 : 0;
+    const totalOrig = orig1 + orig2;
+
+    const total = parseFloat($('length').value);
+    const l1 = parseFloat($('length1').value);
+    const l2 = parseFloat($('length2').value);
+
+    let target1, target2;
+    if (total > 0 && hasSecond) {
+      const w1 = l1 > 0 ? l1 : orig1;
+      const w2 = l2 > 0 ? l2 : orig2;
+      const sumW = w1 + w2 || 1;
+      target1 = total * w1 / sumW;
+      target2 = total * w2 / sumW;
+    } else if (total > 0) {
+      target1 = total;
+      target2 = 0;
+    } else {
+      target1 = l1 > 0 ? l1 : orig1;
+      target2 = hasSecond ? (l2 > 0 ? l2 : orig2) : 0;
     }
-    return state.duration1;
+
+    return { orig1, orig2, totalOrig, target1, target2, hasSecond };
   }
 
   function updateLengthDesc() {
-    const orig = getOriginalDur();
-    const input = $('length');
-    if (orig > 0) {
-      const rounded = orig.toFixed(1);
-      $('length-desc').textContent = `Original: ${rounded}s — leave blank to keep it`;
-      input.placeholder = rounded;
-    } else {
+    const r = resolveLengths();
+    const splice = state.tab === 'splice';
+
+    if (!state.file1) {
       $('length-desc').textContent = 'Leave blank to keep the original length';
-      input.placeholder = 'auto';
+      $('length').placeholder = 'auto';
+      $('length1-desc').textContent = 'Original: —';
+      $('length2-desc').textContent = 'Original: —';
+      $('length1').placeholder = 'auto';
+      $('length2').placeholder = 'auto';
+      return;
+    }
+
+    const totalHint = splice && r.hasSecond ? ' — leave blank to use values below' : ' — leave blank to keep it';
+    $('length-desc').textContent = `Original: ${r.totalOrig.toFixed(1)}s${totalHint}`;
+    $('length').placeholder = r.totalOrig.toFixed(1);
+
+    $('length1-desc').textContent = `Original: ${r.orig1.toFixed(1)}s`;
+    $('length1').placeholder = r.orig1.toFixed(1);
+
+    if (r.hasSecond) {
+      $('length2-desc').textContent = `Original: ${r.orig2.toFixed(1)}s`;
+      $('length2').placeholder = r.orig2.toFixed(1);
+    } else {
+      $('length2-desc').textContent = 'Original: —';
+      $('length2').placeholder = 'auto';
     }
   }
 
-  $('trim').addEventListener('input', updateLengthDesc);
+  ['trim', 'length', 'length1', 'length2'].forEach(id => {
+    $(id).addEventListener('input', updateLengthDesc);
+  });
 
   setupDrop('drop1', 'file1', 'info1', 'file1');
   setupDrop('drop2', 'file2', 'info2', 'file2');
@@ -547,10 +611,11 @@
     const trim = hasSecond ? (parseFloat($('trim').value) || 0) : 0;
     const hold = parseFloat($('hold').value) || 0;
     const addFlash = $('flash').checked;
-    const targetLen = parseFloat($('length').value);
-    const origDur = getOriginalDur();
-    const speedFactor = (targetLen > 0 && origDur > 0) ? (targetLen / origDur) : 1;
-    const setpts = speedFactor === 1 ? '' : `setpts=PTS*${speedFactor.toFixed(6)},`;
+    const r = resolveLengths();
+    const speed1 = r.orig1 > 0 ? r.target1 / r.orig1 : 1;
+    const speed2 = r.orig2 > 0 ? r.target2 / r.orig2 : 1;
+    const setpts1 = Math.abs(speed1 - 1) < 0.001 ? '' : `setpts=PTS*${speed1.toFixed(6)},`;
+    const setpts2 = Math.abs(speed2 - 1) < 0.001 ? '' : `setpts=PTS*${speed2.toFixed(6)},`;
 
     try {
       // determine target dims/fps from video 1
@@ -571,7 +636,7 @@
       await ffmpeg.run(
         '-t', trimmedDur.toFixed(3),
         '-i', 'in1.mp4',
-        '-vf', `${setpts}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+        '-vf', `${setpts1}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
         '-an',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
         'p1.mp4'
@@ -584,7 +649,7 @@
         setProgress('Normalizing second video…', 35);
         await ffmpeg.run(
           '-i', 'in2.mp4',
-          '-vf', `${setpts}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+          '-vf', `${setpts2}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
           '-an',
           '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
           'p2.mp4'
