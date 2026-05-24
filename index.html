@@ -32,6 +32,10 @@
     grid-template-columns: minmax(0, 1fr) 400px;
     gap: 24px;
     align-items: start;
+    transition: grid-template-columns 0.25s ease;
+  }
+  .layout.done {
+    grid-template-columns: minmax(0, 1fr) 560px;
   }
   .layout .main { min-width: 0; }
   .layout .side {
@@ -822,6 +826,11 @@
     currentStepIdx = steps.length - 1;
     renderSteps();
   }
+  function collapseToDone() {
+    steps = [{ label: 'Done', status: 'done', pct: 100 }];
+    currentStepIdx = 0;
+    renderSteps();
+  }
   function renderSteps() {
     const c = $('steps');
     if (steps.length === 0) { c.innerHTML = ''; updateSidePlaceholder(); return; }
@@ -967,6 +976,7 @@
   $('go').addEventListener('click', async () => {
     $('error').textContent = '';
     $('result').style.display = 'none';
+    document.querySelector('.layout').classList.remove('done');
     $('go').disabled = true;
 
     const hold = parseFloat($('hold').value) || 0;
@@ -1145,8 +1155,9 @@
         'out.mp4'
       );
 
-      finishAllSteps();
-      setProgress('Done.');
+      collapseToDone();
+      setProgress('');
+      document.querySelector('.layout').classList.add('done');
 
       const data = ffmpeg.FS('readFile', 'out.mp4');
       const blob = new Blob([data.buffer], { type: 'video/mp4' });
