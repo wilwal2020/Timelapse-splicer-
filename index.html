@@ -811,7 +811,12 @@
 
   async function runDeflicker(inputName, outputName, sensitivity, hooks) {
     hooks = hooks || {};
-    const threshold = Math.max(3, 30 - sensitivity * 0.27);
+    // sensitivity 0..100 maps to two thresholds:
+    //  T (absolute floor): 30..1 — how big a change must be to even consider
+    //  R (ratio): 4..1.3   — how much MORE the frame differs from neighbors
+    //                         than neighbors differ from each other
+    const T = Math.max(1, 30 - sensitivity * 0.29);
+    const R = Math.max(1.3, 4 - sensitivity * 0.027);
 
     await ffmpeg.run(
       '-i', inputName,
@@ -824,33 +829,47 @@
     const SIZE = 32 * 32;
     const n = Math.floor(data.length / SIZE);
 
-    function dist(offA, offB) {
+    function dist(i, j) {
       let sum = 0;
-      for (let k = 0; k < SIZE; k++) sum += Math.abs(data[offA + k] - data[offB + k]);
+      const offI = i * SIZE, offJ = j * SIZE;
+      for (let k = 0; k < SIZE; k++) sum += Math.abs(data[offI + k] - data[offJ + k]);
       return sum / SIZE;
     }
 
-    const flickerList = [];
+    const flickerSet = new Set();
     if (n >= 3) {
+      // Pass 1: 1-frame flickers
       for (let i = 1; i < n - 1; i++) {
-        const offPrev = (i - 1) * SIZE;
-        const offCur  = i * SIZE;
-        const offNext = (i + 1) * SIZE;
-        const dPrev = dist(offPrev, offCur);
-        const dNext = dist(offCur, offNext);
-        const dCtx  = dist(offPrev, offNext);
-        if (dPrev > threshold && dNext > threshold && dCtx < threshold * 0.5) {
-          flickerList.push(i);
+        const dPrev = dist(i - 1, i);
+        const dNext = dist(i, i + 1);
+        const dCtx  = dist(i - 1, i + 1);
+        if (dPrev > T && dNext > T && dPrev > R * dCtx && dNext > R * dCtx) {
+          flickerSet.add(i);
+        }
+      }
+      // Pass 2: 2-frame flicker bursts (i, i+1 are similar to each other but
+      // differ from i-1 and i+2, while i-1 and i+2 are similar)
+      for (let i = 1; i < n - 2; i++) {
+        if (flickerSet.has(i) || flickerSet.has(i + 1)) continue;
+        const dIn    = dist(i - 1, i);
+        const dOut   = dist(i + 1, i + 2);
+        const dRest  = dist(i - 1, i + 2);
+        const dBurst = dist(i, i + 1);
+        if (dIn > T && dOut > T && dIn > R * dRest && dOut > R * dRest && dBurst < dIn * 0.5) {
+          flickerSet.add(i);
+          flickerSet.add(i + 1);
         }
       }
     }
     try { ffmpeg.FS('unlink', 'dfl_thumbs.raw'); } catch {}
 
+    const flickerList = Array.from(flickerSet).sort((a, b) => a - b);
+
     if (flickerList.length === 0) {
       hooks.skipped && hooks.skipped('No flicker detected — skipped');
       return { count: 0, outputName: inputName };
     }
-    if (flickerList.length > n * 0.6) {
+    if (flickerList.length > n * 0.8) {
       hooks.skipped && hooks.skipped('Too many candidates — aborted (lower sensitivity)');
       return { count: 0, outputName: inputName, aborted: true };
     }
