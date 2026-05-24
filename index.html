@@ -637,8 +637,48 @@
     $('deflicker-sens-val').textContent = $('deflicker-sens').value;
   });
 
+  // Persist user preferences (not video-specific values like length1/length2)
+  const STORAGE_KEY = 'timesplicer-settings-v1';
+  const PERSIST_TEXT = ['trim-start', 'trim', 'intro', 'hold', 'deflicker-sens'];
+  const PERSIST_CHECK = ['flash', 'deflicker'];
+
+  function saveSettings() {
+    const data = { tab: state.tab };
+    PERSIST_TEXT.forEach(k => { data[k] = $(k).value; });
+    PERSIST_CHECK.forEach(k => { data[k] = $(k).checked; });
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
+  }
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      PERSIST_TEXT.forEach(k => {
+        if (data[k] !== undefined && data[k] !== null) $(k).value = data[k];
+      });
+      PERSIST_CHECK.forEach(k => {
+        if (typeof data[k] === 'boolean') $(k).checked = data[k];
+      });
+      if (data.tab === 'add' || data.tab === 'splice') {
+        state.tab = data.tab;
+        document.querySelectorAll('.tab').forEach(t => {
+          t.classList.toggle('active', t.dataset.tab === data.tab);
+        });
+      }
+      // Sync dependent UI bits
+      $('deflicker-sens-row').style.display = $('deflicker').checked ? '' : 'none';
+      $('deflicker-sens-val').textContent = $('deflicker-sens').value;
+    } catch {}
+  }
+
+  PERSIST_TEXT.forEach(k => $(k).addEventListener('input', saveSettings));
+  PERSIST_CHECK.forEach(k => $(k).addEventListener('change', saveSettings));
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', saveSettings));
+
   setupDrop('drop1', 'file1', 'info1', 'file1');
   setupDrop('drop2', 'file2', 'info2', 'file2');
+  loadSettings();
   updateModeUI();
 
   function checkReady() {
