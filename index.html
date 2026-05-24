@@ -221,18 +221,60 @@
     color: var(--text-dim);
     min-height: 18px;
   }
-  .bar {
-    height: 4px;
-    background: var(--surface-2);
-    border-radius: 2px;
-    overflow: hidden;
-    margin-top: 8px;
+  .steps {
+    margin-top: 10px;
+    font-size: 13px;
   }
-  .bar > div {
-    height: 100%;
+  .steps:empty { display: none; }
+  .step-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 0;
+    color: var(--text-dim);
+    transition: color 0.15s;
+  }
+  .step-item.active, .step-item.done { color: var(--text); }
+  .step-icon {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    flex-shrink: 0;
+    position: relative;
+    background: var(--surface-2);
+  }
+  .step-item.active .step-icon {
+    border-color: var(--accent);
     background: var(--accent);
-    width: 0%;
-    transition: width 0.2s;
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  .step-item.done .step-icon {
+    border-color: var(--success);
+    background: var(--success);
+  }
+  .step-item.done .step-icon::after {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 5px;
+    width: 6px;
+    height: 3px;
+    border-left: 1.5px solid #0a1f0e;
+    border-bottom: 1.5px solid #0a1f0e;
+    transform: rotate(-45deg);
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(107, 138, 253, 0.5); }
+    50% { box-shadow: 0 0 0 4px rgba(107, 138, 253, 0); }
+  }
+  .step-label { flex: 1; }
+  .step-pct {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    min-width: 36px;
+    text-align: right;
   }
   .result {
     display: none;
@@ -376,7 +418,7 @@
 
   <button class="primary" id="go" disabled>Loading FFmpeg…</button>
   <div class="progress" id="progress"></div>
-  <div class="bar"><div id="barfill"></div></div>
+  <div class="steps" id="steps"></div>
   <div class="error" id="error"></div>
 
   <div class="result" id="result">
@@ -621,9 +663,71 @@
     }
   }
 
-  function setProgress(text, pct) {
-    $('progress').textContent = text;
-    if (pct !== undefined) $('barfill').style.width = pct + '%';
+  function setProgress(text) {
+    $('progress').textContent = text || '';
+  }
+
+  let steps = [];
+  let currentStepIdx = -1;
+
+  function defineSteps(labels) {
+    steps = labels.filter(Boolean).map(label => ({ label, status: 'pending', pct: 0 }));
+    currentStepIdx = -1;
+    renderSteps();
+  }
+  function clearSteps() { steps = []; currentStepIdx = -1; renderSteps(); }
+  function nextStep() {
+    if (currentStepIdx >= 0 && currentStepIdx < steps.length) {
+      steps[currentStepIdx].status = 'done';
+      steps[currentStepIdx].pct = 100;
+    }
+    currentStepIdx++;
+    if (currentStepIdx < steps.length) {
+      steps[currentStepIdx].status = 'active';
+      steps[currentStepIdx].pct = 0;
+    }
+    renderSteps();
+  }
+  function setCurrentStepLabel(label) {
+    if (currentStepIdx >= 0 && currentStepIdx < steps.length) {
+      steps[currentStepIdx].label = label;
+      renderSteps();
+    }
+  }
+  function markCurrentStepDone(finalLabel) {
+    if (currentStepIdx >= 0 && currentStepIdx < steps.length) {
+      if (finalLabel) steps[currentStepIdx].label = finalLabel;
+      steps[currentStepIdx].status = 'done';
+      steps[currentStepIdx].pct = 100;
+      renderSteps();
+    }
+  }
+  function insertStepAfterCurrent(label) {
+    steps.splice(currentStepIdx + 1, 0, { label, status: 'pending', pct: 0 });
+    renderSteps();
+  }
+  function setStepPct(pct) {
+    if (currentStepIdx >= 0 && currentStepIdx < steps.length && steps[currentStepIdx].status === 'active') {
+      steps[currentStepIdx].pct = Math.max(0, Math.min(100, pct));
+      renderSteps();
+    }
+  }
+  function finishAllSteps() {
+    for (let i = Math.max(0, currentStepIdx); i < steps.length; i++) {
+      steps[i].status = 'done';
+      steps[i].pct = 100;
+    }
+    currentStepIdx = steps.length - 1;
+    renderSteps();
+  }
+  function renderSteps() {
+    const c = $('steps');
+    if (steps.length === 0) { c.innerHTML = ''; return; }
+    c.innerHTML = steps.map(s => {
+      const pctTxt = s.status === 'active' && s.pct > 0 ? `<span class="step-pct">${Math.round(s.pct)}%</span>` : '';
+      const label = s.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `<div class="step-item ${s.status}"><span class="step-icon"></span><span class="step-label">${label}</span>${pctTxt}</div>`;
+    }).join('');
   }
 
   (async () => {
@@ -649,7 +753,7 @@
     fetchFile = api.fetchFile;
     ffmpeg = api.createFFmpeg({ log: false, corePath: CORE_PATH });
     ffmpeg.setProgress(({ ratio }) => {
-      if (ratio >= 0 && ratio <= 1) setProgress(`Processing… ${Math.round(ratio * 100)}%`, ratio * 100);
+      if (ratio >= 0 && ratio <= 1) setStepPct(ratio * 100);
     });
     setProgress('Loading FFmpeg core (~25MB)…');
     try {
@@ -665,11 +769,10 @@
     }
   })();
 
-  async function runDeflicker(inputName, outputName, sensitivity) {
-    // sensitivity 0..100 -> threshold ~30..3 (mean abs diff per pixel, 0..255)
+  async function runDeflicker(inputName, outputName, sensitivity, hooks) {
+    hooks = hooks || {};
     const threshold = Math.max(3, 30 - sensitivity * 0.27);
 
-    setProgress('Analyzing video for flicker…', 8);
     await ffmpeg.run(
       '-i', inputName,
       '-vf', 'scale=32:32:flags=fast_bilinear,format=gray',
@@ -704,15 +807,16 @@
     try { ffmpeg.FS('unlink', 'dfl_thumbs.raw'); } catch {}
 
     if (flickerList.length === 0) {
+      hooks.skipped && hooks.skipped('No flicker detected — skipped');
       return { count: 0, outputName: inputName };
     }
-    // sanity cap — refuse to drop > 60% of frames (threshold is wrong)
     if (flickerList.length > n * 0.6) {
+      hooks.skipped && hooks.skipped('Too many candidates — aborted (lower sensitivity)');
       return { count: 0, outputName: inputName, aborted: true };
     }
 
+    hooks.beginRemove && hooks.beginRemove(flickerList.length);
     const selectExpr = `not(${flickerList.map(i => `eq(n\\,${i})`).join('+')})`;
-    setProgress(`Removing ${flickerList.length} flicker frames…`, 14);
     await ffmpeg.run(
       '-i', inputName,
       '-vf', `select='${selectExpr}',setpts=N/FRAME_RATE/TB`,
@@ -733,6 +837,23 @@
     const splice = state.tab === 'splice';
     const hasSecond = splice && !!state.file2;
     const wantDeflicker = hasSecond && $('deflicker').checked;
+    const introUserVal = parseFloat($('intro').value) || 0;
+    const hasIntro = hasSecond && introUserVal > 0;
+
+    defineSteps([
+      'Reading first video',
+      hasSecond && 'Reading second video',
+      wantDeflicker && 'Analyzing video for flicker',
+      // "Removing N flicker frames" inserted dynamically if flickers are found
+      hasIntro && 'Building intro from second video',
+      splice ? 'Trimming first video' : 'Trimming video',
+      hasSecond && 'Normalizing second video',
+      (addFlash || hold > 0) && 'Capturing final frame',
+      addFlash && 'Building flash',
+      (hold > 0) && 'Building final hold',
+      'Splicing',
+    ]);
+    setProgress('Processing…');
 
     try {
       // determine target dims/fps from video 1
@@ -742,10 +863,10 @@
       const baseFilter = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`;
       const baseEncode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
 
-      setProgress('Reading first video…', 4);
+      nextStep(); // Reading first video
       ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
       if (hasSecond) {
-        setProgress('Reading second video…', 6);
+        nextStep(); // Reading second video
         ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
       }
 
@@ -753,12 +874,22 @@
       let v2Src = 'in2.mp4';
       let effDur2 = state.duration2;
       if (wantDeflicker) {
+        nextStep(); // Analyzing video for flicker
         const sens = parseInt($('deflicker-sens').value, 10);
-        const dfl = await runDeflicker('in2.mp4', 'in2_dfl.mp4', sens);
+        const dfl = await runDeflicker('in2.mp4', 'in2_dfl.mp4', sens, {
+          skipped: (reason) => {
+            insertStepAfterCurrent(reason);
+            nextStep();
+            markCurrentStepDone();
+          },
+          beginRemove: (count) => {
+            insertStepAfterCurrent(`Removing ${count} flicker frames`);
+            nextStep();
+          },
+        });
         if (dfl.aborted) {
           $('error').textContent = 'Deflicker aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
           setProgress('');
-          $('go').disabled = false;
           return;
         }
         if (dfl.count > 0) {
@@ -780,8 +911,8 @@
       const parts = [];
 
       // 1) intro: first intro2 seconds of v2 (deflickered if enabled), moved to the start
-      if (hasSecond && intro2 > 0) {
-        setProgress('Building intro from second video…', 22);
+      if (hasIntro && intro2 > 0) {
+        nextStep(); // Building intro from second video
         await ffmpeg.run(
           '-t', intro2.toFixed(3),
           '-i', v2Src,
@@ -794,7 +925,7 @@
       }
 
       // 2) first video: skip trimStart1, take trimmedDur1, normalize, speed
-      setProgress('Trimming first video…', 30);
+      nextStep(); // Trimming first video
       await ffmpeg.run(
         '-ss', trimStart1.toFixed(3),
         '-t', trimmedDur1.toFixed(3),
@@ -808,7 +939,7 @@
 
       // 3) second video: skip intro2, take the rest, normalize, speed
       if (hasSecond) {
-        setProgress('Normalizing second video…', 50);
+        nextStep(); // Normalizing second video
         await ffmpeg.run(
           '-ss', intro2.toFixed(3),
           '-t', restDur2eff.toFixed(3),
@@ -823,6 +954,7 @@
 
       // extract last frame from the deflickered/original v2 (or v1 in add mode)
       if (addFlash || hold > 0) {
+        nextStep(); // Capturing final frame
         const lastSrc = hasSecond ? v2Src : 'in1.mp4';
         const lastSrcDur = hasSecond ? effDur2 : (state.duration1 - trimEnd1);
         const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
@@ -834,9 +966,9 @@
         );
       }
 
-      // 3) flash: white wash over the finished artwork, fading back to the artwork
+      // 4) flash: white wash over the finished artwork, fading back to the artwork
       if (addFlash) {
-        setProgress('Building flash…', 55);
+        nextStep(); // Building flash
         await ffmpeg.run(
           '-loop', '1', '-i', 'last.png',
           '-f', 'lavfi', '-i', `color=c=white:s=${W}x${H}:r=${FPS}:d=0.45`,
@@ -852,9 +984,9 @@
         parts.push('flash.mp4');
       }
 
-      // 4) hold clip on the last frame
+      // 5) hold clip on the last frame
       if (hold > 0) {
-        setProgress('Building final hold…', 70);
+        nextStep(); // Building final hold
         await ffmpeg.run(
           '-loop', '1', '-i', 'last.png',
           '-t', hold.toFixed(3),
@@ -865,8 +997,8 @@
         parts.push('hold.mp4');
       }
 
-      // 5) concat
-      setProgress('Splicing…', 85);
+      // 6) concat
+      nextStep(); // Splicing
       const concatList = parts.map(p => `file '${p}'`).join('\n');
       ffmpeg.FS('writeFile', 'list.txt', new TextEncoder().encode(concatList));
       await ffmpeg.run(
@@ -876,7 +1008,8 @@
         'out.mp4'
       );
 
-      setProgress('Done.', 100);
+      finishAllSteps();
+      setProgress('Done.');
 
       const data = ffmpeg.FS('readFile', 'out.mp4');
       const blob = new Blob([data.buffer], { type: 'video/mp4' });
