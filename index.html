@@ -300,12 +300,28 @@
 
   <div class="card">
     <h2><span class="step" id="finish-step">3</span>Finish</h2>
+    <div class="row" id="trim-start-row">
+      <div style="flex:1">
+        <label for="trim-start">Cut from start of <span id="trim-start-target">first video</span></label>
+        <div class="desc">Removes the CSP preview that shows the (incomplete) art</div>
+      </div>
+      <input type="number" id="trim-start" min="0" max="60" step="0.1" value="0">
+      <span class="unit">sec</span>
+    </div>
     <div class="row splice-only" id="trim-row">
       <div style="flex:1">
         <label for="trim">Cut from end of first video</label>
         <div class="desc">Removes CSP's built-in final flash so it doesn't show mid-splice</div>
       </div>
       <input type="number" id="trim" min="0" max="30" step="0.1" value="2">
+      <span class="unit">sec</span>
+    </div>
+    <div class="row splice-only" id="intro-row">
+      <div style="flex:1">
+        <label for="intro">Move start of second video to intro</label>
+        <div class="desc" id="intro-desc">Shows the finished art briefly at the start, then plays the timelapse</div>
+      </div>
+      <input type="number" id="intro" min="0" max="30" step="0.1" value="0">
       <span class="unit">sec</span>
     </div>
     <div class="row">
@@ -467,14 +483,17 @@
       ? "Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join."
       : 'Add a clean flash and a final hold to a timelapse that does not already have a built-in flash.';
     $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
+    $('trim-start-target').textContent = splice ? 'first video' : 'video';
     updateLengthDesc();
   }
 
   function resolveLengths() {
     const splice = state.tab === 'splice';
     const hasSecond = splice && !!state.file2;
-    const trim = splice ? (parseFloat($('trim').value) || 0) : 0;
-    const orig1 = state.file1 ? Math.max(0.1, state.duration1 - trim) : 0;
+    const trimStart1 = state.file1 ? Math.max(0, Math.min(parseFloat($('trim-start').value) || 0, state.duration1 - 0.1)) : 0;
+    const trimEnd1 = splice ? (parseFloat($('trim').value) || 0) : 0;
+    const intro2 = hasSecond ? Math.max(0, Math.min(parseFloat($('intro').value) || 0, state.duration2 - 0.1)) : 0;
+    const orig1 = state.file1 ? Math.max(0.1, state.duration1 - trimStart1 - trimEnd1) : 0;
     const orig2 = hasSecond ? state.duration2 : 0;
     const totalOrig = orig1 + orig2;
 
@@ -497,7 +516,10 @@
       target2 = hasSecond ? (l2 > 0 ? l2 : orig2) : 0;
     }
 
-    return { orig1, orig2, totalOrig, target1, target2, hasSecond };
+    const speed1 = orig1 > 0 ? target1 / orig1 : 1;
+    const speed2 = orig2 > 0 ? target2 / orig2 : 1;
+
+    return { orig1, orig2, totalOrig, target1, target2, hasSecond, speed1, speed2, trimStart1, trimEnd1, intro2 };
   }
 
   function updateLengthDesc() {
@@ -534,13 +556,20 @@
       $('length2-desc').textContent = 'Original: —';
       $('length2').placeholder = 'auto';
     }
+
+    if (r.hasSecond && r.intro2 > 0) {
+      const introDisplayed = r.intro2 * r.speed2;
+      $('intro-desc').textContent = `${r.intro2.toFixed(1)}s of video 2 → ${introDisplayed.toFixed(1)}s intro at the start`;
+    } else {
+      $('intro-desc').textContent = 'Shows the finished art briefly at the start, then plays the timelapse';
+    }
   }
 
   $('length').addEventListener('input', e => {
     state.totalDirty = e.target.value !== '';
     updateLengthDesc();
   });
-  ['trim', 'length1', 'length2'].forEach(id => {
+  ['trim', 'trim-start', 'intro', 'length1', 'length2'].forEach(id => {
     $(id).addEventListener('input', updateLengthDesc);
   });
 
@@ -619,21 +648,21 @@
     $('result').style.display = 'none';
     $('go').disabled = true;
 
-    const hasSecond = !!state.file2;
-    const trim = hasSecond ? (parseFloat($('trim').value) || 0) : 0;
     const hold = parseFloat($('hold').value) || 0;
     const addFlash = $('flash').checked;
     const r = resolveLengths();
-    const speed1 = r.orig1 > 0 ? r.target1 / r.orig1 : 1;
-    const speed2 = r.orig2 > 0 ? r.target2 / r.orig2 : 1;
+    const { speed1, speed2, trimStart1, trimEnd1, intro2, hasSecond } = r;
     const setpts1 = Math.abs(speed1 - 1) < 0.001 ? '' : `setpts=PTS*${speed1.toFixed(6)},`;
     const setpts2 = Math.abs(speed2 - 1) < 0.001 ? '' : `setpts=PTS*${speed2.toFixed(6)},`;
+    const trimmedDur1 = Math.max(0.1, state.duration1 - trimStart1 - trimEnd1);
 
     try {
       // determine target dims/fps from video 1
       const probe = await getVideoProps(state.file1);
       const W = probe.width, H = probe.height;
       const FPS = 30; // normalize for consistent splicing
+      const baseFilter = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`;
+      const baseEncode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
 
       setProgress('Reading first video…', 5);
       ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
@@ -642,28 +671,46 @@
         ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
       }
 
-      // 1) trim end of first video, normalize
-      const trimmedDur = Math.max(0.1, state.duration1 - trim);
-      setProgress('Trimming first video…', 15);
+      const parts = [];
+
+      // 1) intro: first intro2 seconds of v2, moved to the start
+      if (hasSecond && intro2 > 0) {
+        setProgress('Building intro from second video…', 15);
+        await ffmpeg.run(
+          '-t', intro2.toFixed(3),
+          '-i', 'in2.mp4',
+          '-vf', `${setpts2}${baseFilter}`,
+          '-an',
+          ...baseEncode,
+          'intro.mp4'
+        );
+        parts.push('intro.mp4');
+      }
+
+      // 2) first video: skip trimStart1, take trimmedDur1, normalize, speed
+      setProgress('Trimming first video…', 25);
       await ffmpeg.run(
-        '-t', trimmedDur.toFixed(3),
+        '-ss', trimStart1.toFixed(3),
+        '-t', trimmedDur1.toFixed(3),
         '-i', 'in1.mp4',
-        '-vf', `${setpts1}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+        '-vf', `${setpts1}${baseFilter}`,
         '-an',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+        ...baseEncode,
         'p1.mp4'
       );
+      parts.push('p1.mp4');
 
-      const parts = ['p1.mp4'];
-
-      // 2) normalize second video (if any)
+      // 3) second video: skip intro2, take the rest, normalize, speed
       if (hasSecond) {
-        setProgress('Normalizing second video…', 35);
+        const restDur = Math.max(0.1, state.duration2 - intro2);
+        setProgress('Normalizing second video…', 45);
         await ffmpeg.run(
+          '-ss', intro2.toFixed(3),
+          '-t', restDur.toFixed(3),
           '-i', 'in2.mp4',
-          '-vf', `${setpts2}scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
+          '-vf', `${setpts2}${baseFilter}`,
           '-an',
-          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          ...baseEncode,
           'p2.mp4'
         );
         parts.push('p2.mp4');
@@ -672,7 +719,7 @@
       // extract last frame from original-timed source so speed-change doesn't shift the seek
       if (addFlash || hold > 0) {
         const lastSrc = hasSecond ? 'in2.mp4' : 'in1.mp4';
-        const lastSrcDur = hasSecond ? state.duration2 : trimmedDur;
+        const lastSrcDur = hasSecond ? state.duration2 : (state.duration1 - trimEnd1);
         const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
         await ffmpeg.run(
           '-ss', lastFrameTime.toFixed(3),
@@ -734,7 +781,7 @@
       $('result').style.display = 'block';
 
       // cleanup
-      ['in1.mp4','in2.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
+      ['in1.mp4','in2.mp4','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
         try { ffmpeg.FS('unlink', f); } catch {}
       });
     } catch (e) {
