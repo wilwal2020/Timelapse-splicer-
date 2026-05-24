@@ -26,7 +26,47 @@
     padding: 32px 20px;
     min-height: 100vh;
   }
-  .container { max-width: 720px; margin: 0 auto; }
+  .container { max-width: 1160px; margin: 0 auto; }
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 24px;
+    align-items: start;
+  }
+  .layout .main { min-width: 0; }
+  .layout .side {
+    position: sticky;
+    top: 20px;
+    align-self: start;
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+  }
+  .side-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+  .side-panel-title {
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 10px;
+    font-weight: 500;
+  }
+  .side-placeholder {
+    font-size: 13px;
+    color: var(--text-dim);
+    text-align: center;
+    padding: 24px 8px;
+  }
+  @media (max-width: 880px) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .layout .side { position: static; }
+  }
   h1 {
     font-size: 24px;
     font-weight: 500;
@@ -322,6 +362,8 @@
     <button class="tab" data-tab="add" type="button">Add flash &amp; hold</button>
   </div>
 
+  <div class="layout">
+  <div class="main">
   <div class="card">
     <h2><span class="step">1</span><span id="card1-title">First video (e.g. Clip Studio Paint)</span></h2>
     <div class="drop" id="drop1">
@@ -417,13 +459,21 @@
   </div>
 
   <button class="primary" id="go" disabled>Loading FFmpeg…</button>
-  <div class="progress" id="progress"></div>
-  <div class="steps" id="steps"></div>
-  <div class="error" id="error"></div>
+  </div>
 
-  <div class="result" id="result">
-    <video id="preview" controls></video>
-    <a id="dl" download="timelapse-spliced.mp4">Download</a>
+  <div class="side">
+    <div class="side-panel">
+      <div class="side-panel-title">Status &amp; output</div>
+      <div class="progress" id="progress"></div>
+      <div class="steps" id="steps"></div>
+      <div class="error" id="error"></div>
+      <div class="result" id="result">
+        <video id="preview" controls></video>
+        <a id="dl" download="timelapse-spliced.mp4">Download</a>
+      </div>
+      <div class="side-placeholder" id="side-placeholder">Output will appear here once you start a job</div>
+    </div>
+  </div>
   </div>
 
   <p class="footnote">Everything runs locally in your browser — no uploads.</p>
@@ -705,6 +755,18 @@
 
   function setProgress(text) {
     $('progress').textContent = text || '';
+    updateSidePlaceholder();
+  }
+
+  function updateSidePlaceholder() {
+    const ph = $('side-placeholder');
+    if (!ph) return;
+    const hasContent =
+      ($('progress').textContent || '').length > 0 ||
+      ($('error').textContent || '').length > 0 ||
+      ($('steps').children.length > 0) ||
+      $('result').style.display === 'block';
+    ph.style.display = hasContent ? 'none' : '';
   }
 
   let steps = [];
@@ -762,12 +824,13 @@
   }
   function renderSteps() {
     const c = $('steps');
-    if (steps.length === 0) { c.innerHTML = ''; return; }
+    if (steps.length === 0) { c.innerHTML = ''; updateSidePlaceholder(); return; }
     c.innerHTML = steps.map(s => {
       const pctTxt = s.status === 'active' && s.pct > 0 ? `<span class="step-pct">${Math.round(s.pct)}%</span>` : '';
       const label = s.label.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       return `<div class="step-item ${s.status}"><span class="step-icon"></span><span class="step-label">${label}</span>${pctTxt}</div>`;
     }).join('');
+    updateSidePlaceholder();
   }
 
   (async () => {
@@ -801,7 +864,7 @@
       $('go').textContent = state.file1
         ? (state.file2 ? 'Splice videos' : 'Process video')
         : 'Choose a video to begin';
-      setProgress('Ready.');
+      setProgress('');
       checkReady();
     } catch (e) {
       setProgress('');
@@ -1091,6 +1154,7 @@
       $('preview').src = url;
       $('dl').href = url;
       $('result').style.display = 'block';
+      updateSidePlaceholder();
 
       // cleanup
       ['in1.mp4','in2.mp4','in2_dfl.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
@@ -1099,6 +1163,7 @@
     } catch (e) {
       $('error').textContent = 'Error: ' + (e.message || e);
       setProgress('');
+      updateSidePlaceholder();
     } finally {
       $('go').disabled = false;
     }
