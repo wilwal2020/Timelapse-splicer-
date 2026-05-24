@@ -296,6 +296,18 @@
       <input type="file" id="file2" accept="video/*">
       <div id="info2">Click to choose or drag a video here</div>
     </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="deflicker">
+      <label for="deflicker">Remove flicker frames (PS visibility toggles, etc.)</label>
+    </div>
+    <div class="row sub" id="deflicker-sens-row" style="display:none">
+      <div style="flex:1">
+        <label for="deflicker-sens">Flicker sensitivity</label>
+        <div class="desc">Higher removes more; if real changes get dropped, lower it</div>
+      </div>
+      <input type="range" id="deflicker-sens" min="0" max="100" value="50">
+      <span class="unit" id="deflicker-sens-val">50</span>
+    </div>
   </div>
 
   <div class="card">
@@ -487,14 +499,17 @@
     updateLengthDesc();
   }
 
-  function resolveLengths() {
+  function resolveLengths(opts) {
+    opts = opts || {};
     const splice = state.tab === 'splice';
     const hasSecond = splice && !!state.file2;
-    const trimStart1 = state.file1 ? Math.max(0, Math.min(parseFloat($('trim-start').value) || 0, state.duration1 - 0.1)) : 0;
+    const duration1 = opts.duration1 != null ? opts.duration1 : state.duration1;
+    const duration2 = opts.duration2 != null ? opts.duration2 : state.duration2;
+    const trimStart1 = state.file1 ? Math.max(0, Math.min(parseFloat($('trim-start').value) || 0, duration1 - 0.1)) : 0;
     const trimEnd1 = splice ? (parseFloat($('trim').value) || 0) : 0;
-    const intro2 = hasSecond ? Math.max(0, Math.min(parseFloat($('intro').value) || 0, state.duration2 - 0.1)) : 0;
-    const orig1 = state.file1 ? Math.max(0.1, state.duration1 - trimStart1 - trimEnd1) : 0;
-    const orig2 = hasSecond ? state.duration2 : 0;
+    const intro2 = hasSecond ? Math.max(0, Math.min(parseFloat($('intro').value) || 0, duration2 - 0.1)) : 0;
+    const orig1 = state.file1 ? Math.max(0.1, duration1 - trimStart1 - trimEnd1) : 0;
+    const orig2 = hasSecond ? duration2 : 0;
     const totalOrig = orig1 + orig2;
 
     const total = parseFloat($('length').value);
@@ -573,6 +588,13 @@
     $(id).addEventListener('input', updateLengthDesc);
   });
 
+  $('deflicker').addEventListener('change', () => {
+    $('deflicker-sens-row').style.display = $('deflicker').checked ? '' : 'none';
+  });
+  $('deflicker-sens').addEventListener('input', () => {
+    $('deflicker-sens-val').textContent = $('deflicker-sens').value;
+  });
+
   setupDrop('drop1', 'file1', 'info1', 'file1');
   setupDrop('drop2', 'file2', 'info2', 'file2');
   updateModeUI();
@@ -643,6 +665,64 @@
     }
   })();
 
+  async function runDeflicker(inputName, outputName, sensitivity) {
+    // sensitivity 0..100 -> threshold ~30..3 (mean abs diff per pixel, 0..255)
+    const threshold = Math.max(3, 30 - sensitivity * 0.27);
+
+    setProgress('Analyzing video for flicker…', 8);
+    await ffmpeg.run(
+      '-i', inputName,
+      '-vf', 'scale=32:32:flags=fast_bilinear,format=gray',
+      '-c:v', 'rawvideo', '-f', 'rawvideo',
+      'dfl_thumbs.raw'
+    );
+
+    const data = ffmpeg.FS('readFile', 'dfl_thumbs.raw');
+    const SIZE = 32 * 32;
+    const n = Math.floor(data.length / SIZE);
+
+    function dist(offA, offB) {
+      let sum = 0;
+      for (let k = 0; k < SIZE; k++) sum += Math.abs(data[offA + k] - data[offB + k]);
+      return sum / SIZE;
+    }
+
+    const flickerList = [];
+    if (n >= 3) {
+      for (let i = 1; i < n - 1; i++) {
+        const offPrev = (i - 1) * SIZE;
+        const offCur  = i * SIZE;
+        const offNext = (i + 1) * SIZE;
+        const dPrev = dist(offPrev, offCur);
+        const dNext = dist(offCur, offNext);
+        const dCtx  = dist(offPrev, offNext);
+        if (dPrev > threshold && dNext > threshold && dCtx < threshold * 0.5) {
+          flickerList.push(i);
+        }
+      }
+    }
+    try { ffmpeg.FS('unlink', 'dfl_thumbs.raw'); } catch {}
+
+    if (flickerList.length === 0) {
+      return { count: 0, outputName: inputName };
+    }
+    // sanity cap — refuse to drop > 60% of frames (threshold is wrong)
+    if (flickerList.length > n * 0.6) {
+      return { count: 0, outputName: inputName, aborted: true };
+    }
+
+    const selectExpr = `not(${flickerList.map(i => `eq(n\\,${i})`).join('+')})`;
+    setProgress(`Removing ${flickerList.length} flicker frames…`, 14);
+    await ffmpeg.run(
+      '-i', inputName,
+      '-vf', `select='${selectExpr}',setpts=N/FRAME_RATE/TB`,
+      '-an',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      outputName
+    );
+    return { count: flickerList.length, outputName };
+  }
+
   $('go').addEventListener('click', async () => {
     $('error').textContent = '';
     $('result').style.display = 'none';
@@ -650,11 +730,9 @@
 
     const hold = parseFloat($('hold').value) || 0;
     const addFlash = $('flash').checked;
-    const r = resolveLengths();
-    const { speed1, speed2, trimStart1, trimEnd1, intro2, hasSecond } = r;
-    const setpts1 = Math.abs(speed1 - 1) < 0.001 ? '' : `setpts=PTS*${speed1.toFixed(6)},`;
-    const setpts2 = Math.abs(speed2 - 1) < 0.001 ? '' : `setpts=PTS*${speed2.toFixed(6)},`;
-    const trimmedDur1 = Math.max(0.1, state.duration1 - trimStart1 - trimEnd1);
+    const splice = state.tab === 'splice';
+    const hasSecond = splice && !!state.file2;
+    const wantDeflicker = hasSecond && $('deflicker').checked;
 
     try {
       // determine target dims/fps from video 1
@@ -664,21 +742,49 @@
       const baseFilter = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`;
       const baseEncode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
 
-      setProgress('Reading first video…', 5);
+      setProgress('Reading first video…', 4);
       ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
       if (hasSecond) {
-        setProgress('Reading second video…', 10);
+        setProgress('Reading second video…', 6);
         ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
       }
 
+      // optional: deflicker v2 (run before resolveLengths so speed math uses new duration)
+      let v2Src = 'in2.mp4';
+      let effDur2 = state.duration2;
+      if (wantDeflicker) {
+        const sens = parseInt($('deflicker-sens').value, 10);
+        const dfl = await runDeflicker('in2.mp4', 'in2_dfl.mp4', sens);
+        if (dfl.aborted) {
+          $('error').textContent = 'Deflicker aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
+          setProgress('');
+          $('go').disabled = false;
+          return;
+        }
+        if (dfl.count > 0) {
+          v2Src = 'in2_dfl.mp4';
+          const blob = new Blob([ffmpeg.FS('readFile', v2Src).buffer], { type: 'video/mp4' });
+          const tmpFile = new File([blob], v2Src);
+          const dflProps = await getVideoProps(tmpFile);
+          effDur2 = dflProps.duration;
+        }
+      }
+
+      const r = resolveLengths({ duration2: effDur2 });
+      const { speed1, speed2, trimStart1, trimEnd1, intro2 } = r;
+      const setpts1 = Math.abs(speed1 - 1) < 0.001 ? '' : `setpts=PTS*${speed1.toFixed(6)},`;
+      const setpts2 = Math.abs(speed2 - 1) < 0.001 ? '' : `setpts=PTS*${speed2.toFixed(6)},`;
+      const trimmedDur1 = Math.max(0.1, state.duration1 - trimStart1 - trimEnd1);
+      const restDur2eff = Math.max(0.1, effDur2 - intro2);
+
       const parts = [];
 
-      // 1) intro: first intro2 seconds of v2, moved to the start
+      // 1) intro: first intro2 seconds of v2 (deflickered if enabled), moved to the start
       if (hasSecond && intro2 > 0) {
-        setProgress('Building intro from second video…', 15);
+        setProgress('Building intro from second video…', 22);
         await ffmpeg.run(
           '-t', intro2.toFixed(3),
-          '-i', 'in2.mp4',
+          '-i', v2Src,
           '-vf', `${setpts2}${baseFilter}`,
           '-an',
           ...baseEncode,
@@ -688,7 +794,7 @@
       }
 
       // 2) first video: skip trimStart1, take trimmedDur1, normalize, speed
-      setProgress('Trimming first video…', 25);
+      setProgress('Trimming first video…', 30);
       await ffmpeg.run(
         '-ss', trimStart1.toFixed(3),
         '-t', trimmedDur1.toFixed(3),
@@ -702,12 +808,11 @@
 
       // 3) second video: skip intro2, take the rest, normalize, speed
       if (hasSecond) {
-        const restDur = Math.max(0.1, state.duration2 - intro2);
-        setProgress('Normalizing second video…', 45);
+        setProgress('Normalizing second video…', 50);
         await ffmpeg.run(
           '-ss', intro2.toFixed(3),
-          '-t', restDur.toFixed(3),
-          '-i', 'in2.mp4',
+          '-t', restDur2eff.toFixed(3),
+          '-i', v2Src,
           '-vf', `${setpts2}${baseFilter}`,
           '-an',
           ...baseEncode,
@@ -716,10 +821,10 @@
         parts.push('p2.mp4');
       }
 
-      // extract last frame from original-timed source so speed-change doesn't shift the seek
+      // extract last frame from the deflickered/original v2 (or v1 in add mode)
       if (addFlash || hold > 0) {
-        const lastSrc = hasSecond ? 'in2.mp4' : 'in1.mp4';
-        const lastSrcDur = hasSecond ? state.duration2 : (state.duration1 - trimEnd1);
+        const lastSrc = hasSecond ? v2Src : 'in1.mp4';
+        const lastSrcDur = hasSecond ? effDur2 : (state.duration1 - trimEnd1);
         const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
         await ffmpeg.run(
           '-ss', lastFrameTime.toFixed(3),
@@ -781,7 +886,7 @@
       $('result').style.display = 'block';
 
       // cleanup
-      ['in1.mp4','in2.mp4','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
+      ['in1.mp4','in2.mp4','in2_dfl.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
         try { ffmpeg.FS('unlink', f); } catch {}
       });
     } catch (e) {
