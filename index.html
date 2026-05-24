@@ -812,11 +812,11 @@
   async function runDeflicker(inputName, outputName, sensitivity, hooks) {
     hooks = hooks || {};
     // sensitivity 0..100 maps to two thresholds:
-    //  T (absolute floor): 30..1 — how big a change must be to even consider
-    //  R (ratio): 4..1.3   — how much MORE the frame differs from neighbors
+    //  T (absolute floor): 30..0.5 — how big a change must be to even consider
+    //  R (ratio): 4..1.1   — how much MORE the frame differs from neighbors
     //                         than neighbors differ from each other
-    const T = Math.max(1, 30 - sensitivity * 0.29);
-    const R = Math.max(1.3, 4 - sensitivity * 0.027);
+    const T = Math.max(0.5, 30 - sensitivity * 0.295);
+    const R = Math.max(1.1, 4 - sensitivity * 0.029);
 
     await ffmpeg.run(
       '-i', inputName,
@@ -858,6 +858,21 @@
         if (dIn > T && dOut > T && dIn > R * dRest && dOut > R * dRest && dBurst < dIn * 0.5) {
           flickerSet.add(i);
           flickerSet.add(i + 1);
+        }
+      }
+      // Pass 3: 3-frame flicker bursts
+      for (let i = 1; i < n - 3; i++) {
+        if (flickerSet.has(i) || flickerSet.has(i + 1) || flickerSet.has(i + 2)) continue;
+        const dIn     = dist(i - 1, i);
+        const dOut    = dist(i + 2, i + 3);
+        const dRest   = dist(i - 1, i + 3);
+        const dBurst1 = dist(i, i + 1);
+        const dBurst2 = dist(i + 1, i + 2);
+        if (dIn > T && dOut > T && dIn > R * dRest && dOut > R * dRest
+            && dBurst1 < dIn * 0.5 && dBurst2 < dIn * 0.5) {
+          flickerSet.add(i);
+          flickerSet.add(i + 1);
+          flickerSet.add(i + 2);
         }
       }
     }
