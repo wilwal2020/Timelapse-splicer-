@@ -266,6 +266,29 @@
     min-height: 18px;
   }
   .progress:empty { margin: 0; min-height: 0; }
+  .overall {
+    margin: 4px 0 10px;
+  }
+  .overall.hidden { display: none; }
+  .overall-bar {
+    height: 6px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .overall-bar > div {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    transition: width 0.25s ease;
+  }
+  .overall-pct {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: right;
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+  }
   .steps {
     margin-top: 10px;
     font-size: 13px;
@@ -469,6 +492,10 @@
   <div class="side">
     <div class="side-panel">
       <div class="side-panel-title">Status &amp; output</div>
+      <div class="overall hidden" id="overall">
+        <div class="overall-bar"><div id="overall-bar-fill"></div></div>
+        <div class="overall-pct" id="overall-pct">0%</div>
+      </div>
       <div class="progress" id="progress"></div>
       <div class="steps" id="steps"></div>
       <div class="error" id="error"></div>
@@ -776,15 +803,28 @@
 
   let steps = [];
   let currentStepIdx = -1;
+  let totalWeight = 0;
+  let completedWeight = 0;
 
-  function defineSteps(labels) {
-    steps = labels.filter(Boolean).map(label => ({ label, status: 'pending', pct: 0 }));
+  function normalizeStep(item) {
+    if (typeof item === 'string') return { label: item, status: 'pending', pct: 0, weight: 1 };
+    return { label: item.label, status: 'pending', pct: 0, weight: Math.max(0.01, item.weight || 1) };
+  }
+  function defineSteps(items) {
+    steps = items.filter(Boolean).map(normalizeStep);
+    totalWeight = steps.reduce((s, x) => s + x.weight, 0);
+    completedWeight = 0;
     currentStepIdx = -1;
     renderSteps();
+    updateOverall();
   }
-  function clearSteps() { steps = []; currentStepIdx = -1; renderSteps(); }
+  function clearSteps() {
+    steps = []; currentStepIdx = -1; totalWeight = 0; completedWeight = 0;
+    renderSteps(); updateOverall();
+  }
   function nextStep() {
     if (currentStepIdx >= 0 && currentStepIdx < steps.length) {
+      completedWeight += steps[currentStepIdx].weight;
       steps[currentStepIdx].status = 'done';
       steps[currentStepIdx].pct = 100;
     }
@@ -794,6 +834,7 @@
       steps[currentStepIdx].pct = 0;
     }
     renderSteps();
+    updateOverall();
   }
   function setCurrentStepLabel(label) {
     if (currentStepIdx >= 0 && currentStepIdx < steps.length) {
@@ -804,33 +845,57 @@
   function markCurrentStepDone(finalLabel) {
     if (currentStepIdx >= 0 && currentStepIdx < steps.length) {
       if (finalLabel) steps[currentStepIdx].label = finalLabel;
+      // already counted in nextStep; nothing else to add to completedWeight
       steps[currentStepIdx].status = 'done';
       steps[currentStepIdx].pct = 100;
       renderSteps();
+      updateOverall();
     }
   }
-  function insertStepAfterCurrent(label) {
-    steps.splice(currentStepIdx + 1, 0, { label, status: 'pending', pct: 0 });
+  function insertStepAfterCurrent(label, weight) {
+    const step = normalizeStep({ label, weight: weight || 1 });
+    steps.splice(currentStepIdx + 1, 0, step);
+    totalWeight += step.weight;
     renderSteps();
+    updateOverall();
   }
   function setStepPct(pct) {
     if (currentStepIdx >= 0 && currentStepIdx < steps.length && steps[currentStepIdx].status === 'active') {
       steps[currentStepIdx].pct = Math.max(0, Math.min(100, pct));
       renderSteps();
+      updateOverall();
     }
   }
   function finishAllSteps() {
     for (let i = Math.max(0, currentStepIdx); i < steps.length; i++) {
+      if (steps[i].status !== 'done') completedWeight += steps[i].weight;
       steps[i].status = 'done';
       steps[i].pct = 100;
     }
     currentStepIdx = steps.length - 1;
     renderSteps();
+    updateOverall();
   }
   function collapseToDone() {
-    steps = [{ label: 'Done', status: 'done', pct: 100 }];
+    steps = [{ label: 'Done', status: 'done', pct: 100, weight: 1 }];
     currentStepIdx = 0;
+    totalWeight = 0;        // hides the overall bar
+    completedWeight = 0;
     renderSteps();
+    updateOverall();
+  }
+  function updateOverall() {
+    const el = $('overall');
+    if (!el) return;
+    if (totalWeight <= 0) { el.classList.add('hidden'); return; }
+    let current = 0;
+    if (currentStepIdx >= 0 && currentStepIdx < steps.length && steps[currentStepIdx].status === 'active') {
+      current = steps[currentStepIdx].weight * (steps[currentStepIdx].pct || 0) / 100;
+    }
+    const pct = Math.max(0, Math.min(100, (completedWeight + current) / totalWeight * 100));
+    el.classList.remove('hidden');
+    $('overall-bar-fill').style.width = pct + '%';
+    $('overall-pct').textContent = Math.round(pct) + '%';
   }
   function renderSteps() {
     const c = $('steps');
@@ -988,18 +1053,28 @@
     const introUserVal = parseFloat($('intro').value) || 0;
     const hasIntro = hasSecond && introUserVal > 0;
 
+    // Weight steps by approximate work (seconds of input video processed).
+    // Encoding dominates, so step duration ~ input duration for trim/normalize/intro.
+    // Flash/last-frame/concat are roughly fixed-cost.
+    const d1 = state.duration1 || 1;
+    const d2 = state.duration2 || 1;
+    const trimStartW = parseFloat($('trim-start').value) || 0;
+    const trimEndW = splice ? (parseFloat($('trim').value) || 0) : 0;
+    const v1Body = Math.max(0.1, d1 - trimStartW - trimEndW);
+    const v2Rest = Math.max(0.1, d2 - introUserVal);
+
     defineSteps([
-      'Reading first video',
-      hasSecond && 'Reading second video',
-      wantDeflicker && 'Analyzing video for flicker',
+      { label: 'Reading first video', weight: 0.2 },
+      hasSecond && { label: 'Reading second video', weight: 0.2 },
+      wantDeflicker && { label: 'Analyzing video for flicker', weight: d2 * 0.6 },
       // "Removing N flicker frames" inserted dynamically if flickers are found
-      hasIntro && 'Building intro from second video',
-      splice ? 'Trimming first video' : 'Trimming video',
-      hasSecond && 'Normalizing second video',
-      (addFlash || hold > 0) && 'Capturing final frame',
-      addFlash && 'Building flash',
-      (hold > 0) && 'Building final hold',
-      'Splicing',
+      hasIntro && { label: 'Building intro from second video', weight: introUserVal },
+      { label: splice ? 'Trimming first video' : 'Trimming video', weight: v1Body },
+      hasSecond && { label: 'Normalizing second video', weight: v2Rest },
+      (addFlash || hold > 0) && { label: 'Capturing final frame', weight: 0.3 },
+      addFlash && { label: 'Building flash', weight: 0.5 },
+      (hold > 0) && { label: 'Building final hold', weight: Math.max(0.3, hold * 0.3) },
+      { label: 'Splicing', weight: 0.5 },
     ]);
     setProgress('Processing…');
 
@@ -1026,12 +1101,12 @@
         const sens = parseInt($('deflicker-sens').value, 10);
         const dfl = await runDeflicker('in2.mp4', 'in2_dfl.mp4', sens, {
           skipped: (reason) => {
-            insertStepAfterCurrent(reason);
+            insertStepAfterCurrent(reason, 0.01);
             nextStep();
             markCurrentStepDone();
           },
           beginRemove: (count) => {
-            insertStepAfterCurrent(`Removing ${count} flicker frames`);
+            insertStepAfterCurrent(`Removing ${count} flicker frames`, d2);
             nextStep();
           },
         });
