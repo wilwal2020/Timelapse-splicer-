@@ -1066,11 +1066,11 @@
     defineSteps([
       { label: 'Reading first video', weight: 0.2 },
       hasSecond && { label: 'Reading second video', weight: 0.2 },
-      wantDeflicker && { label: 'Analyzing video for flicker', weight: d2 * 0.6 },
+      wantDeflicker && { label: 'Analyzing video for flicker', weight: d2 * 0.15 },
       // "Removing N flicker frames" inserted dynamically if flickers are found
-      hasIntro && { label: 'Building intro from second video', weight: introUserVal },
+      hasIntro && { label: 'Building intro from second video', weight: introUserVal * 3 },
       { label: splice ? 'Trimming first video' : 'Trimming video', weight: v1Body },
-      hasSecond && { label: 'Normalizing second video', weight: v2Rest },
+      hasSecond && { label: 'Normalizing second video', weight: v2Rest * 3 },
       (addFlash || hold > 0) && { label: 'Capturing final frame', weight: 0.3 },
       addFlash && { label: 'Building flash', weight: 0.5 },
       (hold > 0) && { label: 'Building final hold', weight: Math.max(0.3, hold * 0.3) },
@@ -1106,7 +1106,7 @@
             markCurrentStepDone();
           },
           beginRemove: (count) => {
-            insertStepAfterCurrent(`Removing ${count} flicker frames`, d2);
+            insertStepAfterCurrent(`Removing ${count} flicker frames`, d2 * 0.7);
             nextStep();
           },
         });
