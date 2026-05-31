@@ -399,6 +399,18 @@
       <input type="file" id="file1" accept="video/*">
       <div id="info1">Click to choose or drag a video here</div>
     </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="deflicker1">
+      <label for="deflicker1">Remove flicker frames (PS visibility toggles, etc.)</label>
+    </div>
+    <div class="row sub" id="deflicker1-sens-row" style="display:none">
+      <div style="flex:1">
+        <label for="deflicker1-sens">Flicker sensitivity</label>
+        <div class="desc">Higher removes more; if real changes get dropped, lower it</div>
+      </div>
+      <input type="range" id="deflicker1-sens" min="0" max="100" value="50">
+      <span class="unit" id="deflicker1-sens-val">50</span>
+    </div>
   </div>
 
   <div class="card splice-only" id="card-second-video">
@@ -718,11 +730,17 @@
   $('deflicker-sens').addEventListener('input', () => {
     $('deflicker-sens-val').textContent = $('deflicker-sens').value;
   });
+  $('deflicker1').addEventListener('change', () => {
+    $('deflicker1-sens-row').style.display = $('deflicker1').checked ? '' : 'none';
+  });
+  $('deflicker1-sens').addEventListener('input', () => {
+    $('deflicker1-sens-val').textContent = $('deflicker1-sens').value;
+  });
 
   // Persist user preferences (not video-specific values like length1/length2)
   const STORAGE_KEY = 'timesplicer-settings-v1';
-  const PERSIST_TEXT = ['trim-start', 'trim', 'intro', 'hold', 'deflicker-sens'];
-  const PERSIST_CHECK = ['flash', 'deflicker'];
+  const PERSIST_TEXT = ['trim-start', 'trim', 'intro', 'hold', 'deflicker-sens', 'deflicker1-sens'];
+  const PERSIST_CHECK = ['flash', 'deflicker', 'deflicker1'];
 
   function saveSettings() {
     const data = { tab: state.tab };
@@ -751,6 +769,8 @@
       // Sync dependent UI bits
       $('deflicker-sens-row').style.display = $('deflicker').checked ? '' : 'none';
       $('deflicker-sens-val').textContent = $('deflicker-sens').value;
+      $('deflicker1-sens-row').style.display = $('deflicker1').checked ? '' : 'none';
+      $('deflicker1-sens-val').textContent = $('deflicker1-sens').value;
     } catch {}
   }
 
@@ -1050,6 +1070,7 @@
     const splice = state.tab === 'splice';
     const hasSecond = splice && !!state.file2;
     const wantDeflicker = hasSecond && $('deflicker').checked;
+    const wantDeflicker1 = $('deflicker1').checked;
     const introUserVal = parseFloat($('intro').value) || 0;
     const hasIntro = hasSecond && introUserVal > 0;
 
@@ -1068,8 +1089,10 @@
     defineSteps([
       { label: 'Reading first video', weight: 0.5 },
       hasSecond && { label: 'Reading second video', weight: 0.5 },
-      wantDeflicker && { label: 'Analyzing video for flicker', weight: d2 * 0.04 },
-      // "Removing N flicker frames" inserted dynamically if flickers are found
+      wantDeflicker1 && { label: splice ? 'Analyzing first video for flicker' : 'Analyzing video for flicker', weight: d1 * 0.04 },
+      // "Removing N flicker frames" for v1 inserted dynamically if flickers are found
+      wantDeflicker && { label: 'Analyzing second video for flicker', weight: d2 * 0.04 },
+      // "Removing N flicker frames" for v2 inserted dynamically if flickers are found
       hasIntro && { label: 'Building intro from second video', weight: introUserVal * 0.45 },
       { label: splice ? 'Trimming first video' : 'Trimming video', weight: v1Body * 0.033 },
       hasSecond && { label: 'Normalizing second video', weight: v2Rest * 0.45 },
@@ -1095,11 +1118,46 @@
         ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
       }
 
+      // optional: deflicker v1
+      let v1Src = 'in1.mp4';
+      let effDur1 = state.duration1;
+      if (wantDeflicker1) {
+        nextStep(); // Analyzing first video for flicker
+        const sens = parseInt($('deflicker1-sens').value, 10);
+        const v1Label = splice ? 'from first video' : '';
+        const dfl = await runDeflicker('in1.mp4', 'in1_dfl.mp4', sens, {
+          skipped: (reason) => {
+            insertStepAfterCurrent(reason, 0.01);
+            nextStep();
+            markCurrentStepDone();
+          },
+          beginRemove: (count) => {
+            insertStepAfterCurrent(
+              `Removing ${count} flicker frames${v1Label ? ' ' + v1Label : ''}`,
+              d1 * 0.06
+            );
+            nextStep();
+          },
+        });
+        if (dfl.aborted) {
+          $('error').textContent = 'Deflicker (first video) aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
+          setProgress('');
+          return;
+        }
+        if (dfl.count > 0) {
+          v1Src = 'in1_dfl.mp4';
+          const blob = new Blob([ffmpeg.FS('readFile', v1Src).buffer], { type: 'video/mp4' });
+          const tmpFile = new File([blob], v1Src);
+          const dflProps = await getVideoProps(tmpFile);
+          effDur1 = dflProps.duration;
+        }
+      }
+
       // optional: deflicker v2 (run before resolveLengths so speed math uses new duration)
       let v2Src = 'in2.mp4';
       let effDur2 = state.duration2;
       if (wantDeflicker) {
-        nextStep(); // Analyzing video for flicker
+        nextStep(); // Analyzing second video for flicker
         const sens = parseInt($('deflicker-sens').value, 10);
         const dfl = await runDeflicker('in2.mp4', 'in2_dfl.mp4', sens, {
           skipped: (reason) => {
@@ -1108,12 +1166,12 @@
             markCurrentStepDone();
           },
           beginRemove: (count) => {
-            insertStepAfterCurrent(`Removing ${count} flicker frames`, d2 * 0.06);
+            insertStepAfterCurrent(`Removing ${count} flicker frames from second video`, d2 * 0.06);
             nextStep();
           },
         });
         if (dfl.aborted) {
-          $('error').textContent = 'Deflicker aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
+          $('error').textContent = 'Deflicker (second video) aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
           setProgress('');
           return;
         }
@@ -1126,11 +1184,11 @@
         }
       }
 
-      const r = resolveLengths({ duration2: effDur2 });
+      const r = resolveLengths({ duration1: effDur1, duration2: effDur2 });
       const { speed1, speed2, trimStart1, trimEnd1, intro2 } = r;
       const setpts1 = Math.abs(speed1 - 1) < 0.001 ? '' : `setpts=PTS*${speed1.toFixed(6)},`;
       const setpts2 = Math.abs(speed2 - 1) < 0.001 ? '' : `setpts=PTS*${speed2.toFixed(6)},`;
-      const trimmedDur1 = Math.max(0.1, state.duration1 - trimStart1 - trimEnd1);
+      const trimmedDur1 = Math.max(0.1, effDur1 - trimStart1 - trimEnd1);
       const restDur2eff = Math.max(0.1, effDur2 - intro2);
 
       const parts = [];
@@ -1154,7 +1212,7 @@
       await ffmpeg.run(
         '-ss', trimStart1.toFixed(3),
         '-t', trimmedDur1.toFixed(3),
-        '-i', 'in1.mp4',
+        '-i', v1Src,
         '-vf', `${setpts1}${baseFilter}`,
         '-an',
         ...baseEncode,
@@ -1180,8 +1238,8 @@
       // extract last frame from the deflickered/original v2 (or v1 in add mode)
       if (addFlash || hold > 0) {
         nextStep(); // Capturing final frame
-        const lastSrc = hasSecond ? v2Src : 'in1.mp4';
-        const lastSrcDur = hasSecond ? effDur2 : (state.duration1 - trimEnd1);
+        const lastSrc = hasSecond ? v2Src : v1Src;
+        const lastSrcDur = hasSecond ? effDur2 : (effDur1 - trimEnd1);
         const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
         await ffmpeg.run(
           '-ss', lastFrameTime.toFixed(3),
@@ -1246,7 +1304,7 @@
       updateSidePlaceholder();
 
       // cleanup
-      ['in1.mp4','in2.mp4','in2_dfl.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
+      ['in1.mp4','in2.mp4','in1_dfl.mp4','in2_dfl.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
         try { ffmpeg.FS('unlink', f); } catch {}
       });
     } catch (e) {
