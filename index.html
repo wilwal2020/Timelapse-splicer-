@@ -408,7 +408,7 @@
         <label for="deflicker1-sens">Flicker sensitivity</label>
         <div class="desc">Higher removes more; if real changes get dropped, lower it</div>
       </div>
-      <input type="range" id="deflicker1-sens" min="0" max="100" value="50">
+      <input type="range" id="deflicker1-sens" min="0" max="200" value="50">
       <span class="unit" id="deflicker1-sens-val">50</span>
     </div>
   </div>
@@ -429,7 +429,7 @@
         <label for="deflicker-sens">Flicker sensitivity</label>
         <div class="desc">Higher removes more; if real changes get dropped, lower it</div>
       </div>
-      <input type="range" id="deflicker-sens" min="0" max="100" value="50">
+      <input type="range" id="deflicker-sens" min="0" max="200" value="50">
       <span class="unit" id="deflicker-sens-val">50</span>
     </div>
   </div>
@@ -969,12 +969,11 @@
 
   async function runDeflicker(inputName, outputName, sensitivity, hooks) {
     hooks = hooks || {};
-    // sensitivity 0..100 maps to two thresholds:
-    //  T (absolute floor): 30..0.5 — how big a change must be to even consider
-    //  R (ratio): 4..1.1   — how much MORE the frame differs from neighbors
-    //                         than neighbors differ from each other
-    const T = Math.max(0.5, 30 - sensitivity * 0.295);
-    const R = Math.max(1.1, 4 - sensitivity * 0.029);
+    // sensitivity uses the same formula 0..100; above 100 keeps going lower:
+    //  T (absolute floor): 30..0.5 at 100, → 0 by ~102
+    //  R (ratio):           4..1.1 at 100, → 0.7 by ~114, floored there
+    const T = Math.max(0, 30 - sensitivity * 0.295);
+    const R = Math.max(0.7, 4 - sensitivity * 0.029);
 
     await ffmpeg.run(
       '-i', inputName,
@@ -1042,7 +1041,7 @@
       hooks.skipped && hooks.skipped('No flicker detected — skipped');
       return { count: 0, outputName: inputName };
     }
-    if (flickerList.length > n * 0.8) {
+    if (flickerList.length > n * 0.9) {
       hooks.skipped && hooks.skipped('Too many candidates — aborted (lower sensitivity)');
       return { count: 0, outputName: inputName, aborted: true };
     }
