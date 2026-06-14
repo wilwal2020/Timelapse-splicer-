@@ -378,6 +378,71 @@
     color: var(--text-dim);
     margin-top: 20px;
   }
+  .timeline { display: none; margin-top: 12px; }
+  .timeline.active { display: block; }
+  .timeline-strip {
+    position: relative;
+    height: 56px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface-2);
+    display: flex;
+    border: 1px solid var(--border);
+  }
+  .timeline-strip img {
+    height: 100%;
+    flex: 1 1 0;
+    min-width: 0;
+    object-fit: cover;
+    pointer-events: none;
+    display: block;
+  }
+  .timeline-loading {
+    margin: auto;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .timeline-region {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+  }
+  .timeline-region.cut {
+    background-color: rgba(248, 113, 113, 0.42);
+    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.22) 0 6px, transparent 6px 12px);
+    box-shadow: inset 0 0 0 1.5px var(--danger);
+  }
+  .timeline-region.intro {
+    background-color: rgba(107, 138, 253, 0.38);
+    box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+  .timeline-legend {
+    margin-top: 6px;
+    font-size: 11.5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .timeline-legend .lg {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-dim);
+  }
+  .timeline-legend .lg::before {
+    content: '';
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+  .timeline-legend .lg.cut::before {
+    background-color: rgba(248, 113, 113, 0.55);
+    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.25) 0 3px, transparent 3px 6px);
+  }
+  .timeline-legend .lg.intro::before { background: rgba(107, 138, 253, 0.6); }
+  .timeline-legend .lg.keep::before { border: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -399,6 +464,10 @@
       <input type="file" id="file1" accept="video/*">
       <div id="info1">Click to choose or drag a video here</div>
     </div>
+    <div class="timeline" id="timeline1">
+      <div class="timeline-strip" id="strip1"></div>
+      <div class="timeline-legend" id="legend1"></div>
+    </div>
     <div class="checkbox-row">
       <input type="checkbox" id="deflicker1">
       <label for="deflicker1">Remove flicker frames (PS visibility toggles, etc.)</label>
@@ -419,6 +488,10 @@
       <button class="remove" data-target="file2" type="button" title="Remove video">×</button>
       <input type="file" id="file2" accept="video/*">
       <div id="info2">Click to choose or drag a video here</div>
+    </div>
+    <div class="timeline" id="timeline2">
+      <div class="timeline-strip" id="strip2"></div>
+      <div class="timeline-legend" id="legend2"></div>
     </div>
     <div class="checkbox-row">
       <input type="checkbox" id="deflicker">
@@ -541,7 +614,7 @@
 
   let ffmpeg = null;
   let fetchFile = null;
-  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false };
+  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, thumbs1: null, thumbs2: null };
   const $ = id => document.getElementById(id);
 
   const DEFAULT_INFO = {
@@ -568,15 +641,19 @@
   }
 
   function removeFile(key) {
+    const n = key === 'file1' ? '1' : '2';
     state[key] = null;
-    state[key === 'file1' ? 'duration1' : 'duration2'] = 0;
-    const dropId = key === 'file1' ? 'drop1' : 'drop2';
-    const infoId = key === 'file1' ? 'info1' : 'info2';
-    const lengthId = key === 'file1' ? 'length1' : 'length2';
+    state['duration' + n] = 0;
+    state['thumbs' + n] = null;
+    const dropId = 'drop' + n;
+    const infoId = 'info' + n;
+    const lengthId = 'length' + n;
     $(dropId).classList.remove('loaded');
     $(key).value = '';
     $(lengthId).value = '';
     $(infoId).textContent = DEFAULT_INFO[key];
+    $('strip' + n).dataset.built = '';
+    $('timeline' + n).classList.remove('active', 'loading');
     updateModeUI();
     checkReady();
   }
@@ -603,7 +680,10 @@
   });
 
   function handleFile(file, drop, info, key) {
+    const n = key === 'file1' ? '1' : '2';
     state[key] = file;
+    state['thumbs' + n] = null;
+    $('strip' + n).dataset.built = '';
     drop.classList.add('loaded');
     // probe duration
     const url = URL.createObjectURL(file);
@@ -612,13 +692,134 @@
     v.src = url;
     v.onloadedmetadata = () => {
       const dur = v.duration;
-      state[key === 'file1' ? 'duration1' : 'duration2'] = dur;
+      state['duration' + n] = dur;
       const sizeMB = (file.size / 1024 / 1024).toFixed(1);
       info.innerHTML = `<div class="filename">${file.name}</div><div class="meta">${dur.toFixed(1)}s · ${sizeMB} MB</div>`;
       URL.revokeObjectURL(url);
       updateModeUI();
       checkReady();
+      // generate filmstrip thumbnails in the background
+      $('timeline' + n).classList.add('loading');
+      renderTimelines();
+      generateThumbnails(file, 12, 56).then(thumbs => {
+        if (state[key] !== file) return; // file was swapped/removed meanwhile
+        state['thumbs' + n] = thumbs;
+        $('timeline' + n).classList.remove('loading');
+        $('strip' + n).dataset.built = '';
+        renderTimelines();
+      }).catch(() => {
+        $('timeline' + n).classList.remove('loading');
+      });
     };
+  }
+
+  function seekTo(v, t) {
+    return new Promise(res => {
+      let done = false;
+      const finish = () => { if (done) return; done = true; v.removeEventListener('seeked', finish); res(); };
+      v.addEventListener('seeked', finish);
+      try { v.currentTime = t; } catch { finish(); }
+      setTimeout(finish, 1500); // fallback so a stuck seek can't hang the strip
+    });
+  }
+
+  function generateThumbnails(file, count, targetH) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement('video');
+      v.muted = true;
+      v.preload = 'auto';
+      v.src = url;
+      const cleanup = () => { try { URL.revokeObjectURL(url); } catch {} };
+      v.onerror = () => { cleanup(); reject(new Error('thumb load failed')); };
+      v.onloadedmetadata = async () => {
+        const dur = v.duration, vw = v.videoWidth, vh = v.videoHeight;
+        if (!vw || !vh || !isFinite(dur) || dur <= 0) { cleanup(); reject(new Error('bad video')); return; }
+        const canvas = document.createElement('canvas');
+        const scale = targetH / vh;
+        canvas.width = Math.max(1, Math.round(vw * scale));
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        const thumbs = [];
+        for (let i = 0; i < count; i++) {
+          const t = Math.min(dur * (i + 0.5) / count, Math.max(0, dur - 0.05));
+          await seekTo(v, t);
+          try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch {}
+          thumbs.push(canvas.toDataURL('image/jpeg', 0.55));
+        }
+        cleanup();
+        resolve(thumbs);
+      };
+    });
+  }
+
+  function addRegion(strip, cls, leftFrac, widthFrac) {
+    leftFrac = Math.max(0, Math.min(1, leftFrac));
+    widthFrac = Math.max(0, Math.min(1 - leftFrac, widthFrac));
+    if (widthFrac <= 0) return;
+    const d = document.createElement('div');
+    d.className = 'timeline-region ' + cls;
+    d.style.left = (leftFrac * 100) + '%';
+    d.style.width = (widthFrac * 100) + '%';
+    strip.appendChild(d);
+  }
+
+  function renderTimelines() {
+    renderOneTimeline('1');
+    renderOneTimeline('2');
+  }
+
+  function renderOneTimeline(n) {
+    const tl = $('timeline' + n);
+    const splice = state.tab === 'splice';
+    const relevant = !!state['file' + n] && (n === '1' || splice);
+    if (!relevant) { tl.classList.remove('active'); return; }
+    tl.classList.add('active');
+
+    const strip = $('strip' + n);
+    const legend = $('legend' + n);
+    const thumbs = state['thumbs' + n];
+
+    if (!thumbs) {
+      if (strip.dataset.built !== 'loading') {
+        strip.innerHTML = '<div class="timeline-loading">Generating preview…</div>';
+        strip.dataset.built = 'loading';
+      }
+      legend.innerHTML = '';
+      return;
+    }
+
+    if (strip.dataset.built !== String(thumbs.length)) {
+      strip.innerHTML = thumbs.map(s => `<img src="${s}" alt="">`).join('');
+      strip.dataset.built = String(thumbs.length);
+    } else {
+      strip.querySelectorAll('.timeline-region').forEach(e => e.remove());
+    }
+
+    const dur = state['duration' + n] || 1;
+    const r = resolveLengths();
+    const parts = [];
+
+    if (n === '1') {
+      if (r.trimStart1 > 0) {
+        addRegion(strip, 'cut', 0, r.trimStart1 / dur);
+        parts.push(`<span class="lg cut">${r.trimStart1.toFixed(1)}s cut from start</span>`);
+      }
+      if (splice && r.trimEnd1 > 0) {
+        addRegion(strip, 'cut', 1 - r.trimEnd1 / dur, r.trimEnd1 / dur);
+        parts.push(`<span class="lg cut">${r.trimEnd1.toFixed(1)}s cut from end</span>`);
+      }
+      if (parts.length === 0) parts.push('<span class="lg keep">Whole video kept</span>');
+    } else {
+      if (r.intro2 > 0) {
+        addRegion(strip, 'intro', 0, r.intro2 / dur);
+        parts.push(`<span class="lg intro">${r.intro2.toFixed(1)}s moved to intro</span>`);
+      } else {
+        parts.push('<span class="lg keep">Whole video kept</span>');
+      }
+    }
+
+    legend.innerHTML = parts.join('');
   }
 
   function updateModeUI() {
@@ -633,6 +834,7 @@
     $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
     $('trim-start-target').textContent = splice ? 'first video' : 'video';
     updateLengthDesc();
+    renderTimelines();
   }
 
   function resolveLengths(opts) {
@@ -721,7 +923,7 @@
     updateLengthDesc();
   });
   ['trim', 'trim-start', 'intro', 'length1', 'length2'].forEach(id => {
-    $(id).addEventListener('input', updateLengthDesc);
+    $(id).addEventListener('input', () => { updateLengthDesc(); renderTimelines(); });
   });
 
   $('deflicker').addEventListener('change', () => {
