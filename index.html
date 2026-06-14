@@ -378,71 +378,6 @@
     color: var(--text-dim);
     margin-top: 20px;
   }
-  .timeline { display: none; margin-top: 12px; }
-  .timeline.active { display: block; }
-  .timeline-strip {
-    position: relative;
-    height: 56px;
-    border-radius: 6px;
-    overflow: hidden;
-    background: var(--surface-2);
-    display: flex;
-    border: 1px solid var(--border);
-  }
-  .timeline-strip img {
-    height: 100%;
-    flex: 1 1 0;
-    min-width: 0;
-    object-fit: cover;
-    pointer-events: none;
-    display: block;
-  }
-  .timeline-loading {
-    margin: auto;
-    font-size: 12px;
-    color: var(--text-dim);
-  }
-  .timeline-region {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    pointer-events: none;
-  }
-  .timeline-region.cut {
-    background-color: rgba(248, 113, 113, 0.42);
-    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.22) 0 6px, transparent 6px 12px);
-    box-shadow: inset 0 0 0 1.5px var(--danger);
-  }
-  .timeline-region.intro {
-    background-color: rgba(107, 138, 253, 0.38);
-    box-shadow: inset 0 0 0 1.5px var(--accent);
-  }
-  .timeline-legend {
-    margin-top: 6px;
-    font-size: 11.5px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .timeline-legend .lg {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--text-dim);
-  }
-  .timeline-legend .lg::before {
-    content: '';
-    width: 11px;
-    height: 11px;
-    border-radius: 2px;
-    display: inline-block;
-  }
-  .timeline-legend .lg.cut::before {
-    background-color: rgba(248, 113, 113, 0.55);
-    background-image: repeating-linear-gradient(45deg, rgba(0,0,0,0.25) 0 3px, transparent 3px 6px);
-  }
-  .timeline-legend .lg.intro::before { background: rgba(107, 138, 253, 0.6); }
-  .timeline-legend .lg.keep::before { border: 1px solid var(--border); }
   .cut-preview { display: none; margin: -2px 0 14px; }
   .cut-preview.active { display: block; }
   .cut-preview-frame {
@@ -488,10 +423,6 @@
       <input type="file" id="file1" accept="video/*">
       <div id="info1">Click to choose or drag a video here</div>
     </div>
-    <div class="timeline" id="timeline1">
-      <div class="timeline-strip" id="strip1"></div>
-      <div class="timeline-legend" id="legend1"></div>
-    </div>
     <div class="checkbox-row">
       <input type="checkbox" id="deflicker1">
       <label for="deflicker1">Remove flicker frames (PS visibility toggles, etc.)</label>
@@ -512,10 +443,6 @@
       <button class="remove" data-target="file2" type="button" title="Remove video">×</button>
       <input type="file" id="file2" accept="video/*">
       <div id="info2">Click to choose or drag a video here</div>
-    </div>
-    <div class="timeline" id="timeline2">
-      <div class="timeline-strip" id="strip2"></div>
-      <div class="timeline-legend" id="legend2"></div>
     </div>
     <div class="checkbox-row">
       <input type="checkbox" id="deflicker">
@@ -650,7 +577,7 @@
 
   let ffmpeg = null;
   let fetchFile = null;
-  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, thumbs1: null, thumbs2: null, prev1: null, prev2: null };
+  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, prev1: null, prev2: null };
   const $ = id => document.getElementById(id);
 
   const DEFAULT_INFO = {
@@ -680,17 +607,12 @@
     const n = key === 'file1' ? '1' : '2';
     state[key] = null;
     state['duration' + n] = 0;
-    state['thumbs' + n] = null;
-    const dropId = 'drop' + n;
-    const infoId = 'info' + n;
-    const lengthId = 'length' + n;
     if (state['prev' + n]) { state['prev' + n].destroy(); state['prev' + n] = null; }
-    $(dropId).classList.remove('loaded');
+    resetCutPreviews();
+    $('drop' + n).classList.remove('loaded');
     $(key).value = '';
-    $(lengthId).value = '';
-    $(infoId).textContent = DEFAULT_INFO[key];
-    $('strip' + n).dataset.built = '';
-    $('timeline' + n).classList.remove('active', 'loading');
+    $('length' + n).value = '';
+    $('info' + n).textContent = DEFAULT_INFO[key];
     updateModeUI();
     checkReady();
   }
@@ -719,10 +641,9 @@
   function handleFile(file, drop, info, key) {
     const n = key === 'file1' ? '1' : '2';
     state[key] = file;
-    state['thumbs' + n] = null;
     if (state['prev' + n]) { state['prev' + n].destroy(); }
     state['prev' + n] = createPreviewer(file);
-    $('strip' + n).dataset.built = '';
+    resetCutPreviews();
     drop.classList.add('loaded');
     // probe duration
     const url = URL.createObjectURL(file);
@@ -737,128 +658,7 @@
       URL.revokeObjectURL(url);
       updateModeUI();
       checkReady();
-      // generate filmstrip thumbnails in the background
-      $('timeline' + n).classList.add('loading');
-      renderTimelines();
-      generateThumbnails(file, 12, 56).then(thumbs => {
-        if (state[key] !== file) return; // file was swapped/removed meanwhile
-        state['thumbs' + n] = thumbs;
-        $('timeline' + n).classList.remove('loading');
-        $('strip' + n).dataset.built = '';
-        renderTimelines();
-      }).catch(() => {
-        $('timeline' + n).classList.remove('loading');
-      });
     };
-  }
-
-  function seekTo(v, t) {
-    return new Promise(res => {
-      let done = false;
-      const finish = () => { if (done) return; done = true; v.removeEventListener('seeked', finish); res(); };
-      v.addEventListener('seeked', finish);
-      try { v.currentTime = t; } catch { finish(); }
-      setTimeout(finish, 1500); // fallback so a stuck seek can't hang the strip
-    });
-  }
-
-  function generateThumbnails(file, count, targetH) {
-    return new Promise((resolve, reject) => {
-      const url = URL.createObjectURL(file);
-      const v = document.createElement('video');
-      v.muted = true;
-      v.preload = 'auto';
-      v.src = url;
-      const cleanup = () => { try { URL.revokeObjectURL(url); } catch {} };
-      v.onerror = () => { cleanup(); reject(new Error('thumb load failed')); };
-      v.onloadedmetadata = async () => {
-        const dur = v.duration, vw = v.videoWidth, vh = v.videoHeight;
-        if (!vw || !vh || !isFinite(dur) || dur <= 0) { cleanup(); reject(new Error('bad video')); return; }
-        const canvas = document.createElement('canvas');
-        const scale = targetH / vh;
-        canvas.width = Math.max(1, Math.round(vw * scale));
-        canvas.height = targetH;
-        const ctx = canvas.getContext('2d');
-        const thumbs = [];
-        for (let i = 0; i < count; i++) {
-          const t = Math.min(dur * (i + 0.5) / count, Math.max(0, dur - 0.05));
-          await seekTo(v, t);
-          try { ctx.drawImage(v, 0, 0, canvas.width, canvas.height); } catch {}
-          thumbs.push(canvas.toDataURL('image/jpeg', 0.55));
-        }
-        cleanup();
-        resolve(thumbs);
-      };
-    });
-  }
-
-  function addRegion(strip, cls, leftFrac, widthFrac) {
-    leftFrac = Math.max(0, Math.min(1, leftFrac));
-    widthFrac = Math.max(0, Math.min(1 - leftFrac, widthFrac));
-    if (widthFrac <= 0) return;
-    const d = document.createElement('div');
-    d.className = 'timeline-region ' + cls;
-    d.style.left = (leftFrac * 100) + '%';
-    d.style.width = (widthFrac * 100) + '%';
-    strip.appendChild(d);
-  }
-
-  function renderTimelines() {
-    renderOneTimeline('1');
-    renderOneTimeline('2');
-  }
-
-  function renderOneTimeline(n) {
-    const tl = $('timeline' + n);
-    const splice = state.tab === 'splice';
-    const relevant = !!state['file' + n] && (n === '1' || splice);
-    if (!relevant) { tl.classList.remove('active'); return; }
-    tl.classList.add('active');
-
-    const strip = $('strip' + n);
-    const legend = $('legend' + n);
-    const thumbs = state['thumbs' + n];
-
-    if (!thumbs) {
-      if (strip.dataset.built !== 'loading') {
-        strip.innerHTML = '<div class="timeline-loading">Generating preview…</div>';
-        strip.dataset.built = 'loading';
-      }
-      legend.innerHTML = '';
-      return;
-    }
-
-    if (strip.dataset.built !== String(thumbs.length)) {
-      strip.innerHTML = thumbs.map(s => `<img src="${s}" alt="">`).join('');
-      strip.dataset.built = String(thumbs.length);
-    } else {
-      strip.querySelectorAll('.timeline-region').forEach(e => e.remove());
-    }
-
-    const dur = state['duration' + n] || 1;
-    const r = resolveLengths();
-    const parts = [];
-
-    if (n === '1') {
-      if (r.trimStart1 > 0) {
-        addRegion(strip, 'cut', 0, r.trimStart1 / dur);
-        parts.push(`<span class="lg cut">${r.trimStart1.toFixed(1)}s cut from start</span>`);
-      }
-      if (splice && r.trimEnd1 > 0) {
-        addRegion(strip, 'cut', 1 - r.trimEnd1 / dur, r.trimEnd1 / dur);
-        parts.push(`<span class="lg cut">${r.trimEnd1.toFixed(1)}s cut from end</span>`);
-      }
-      if (parts.length === 0) parts.push('<span class="lg keep">Whole video kept</span>');
-    } else {
-      if (r.intro2 > 0) {
-        addRegion(strip, 'intro', 0, r.intro2 / dur);
-        parts.push(`<span class="lg intro">${r.intro2.toFixed(1)}s moved to intro</span>`);
-      } else {
-        parts.push('<span class="lg keep">Whole video kept</span>');
-      }
-    }
-
-    legend.innerHTML = parts.join('');
   }
 
   // Persistent per-file seeker that draws a chosen frame into a target <img>.
@@ -874,6 +674,17 @@
     let busy = false, destroyed = false;
     const queue = {}; // key -> { time, img }
 
+    function draw(img) {
+      if (destroyed) return;
+      const scale = Math.min(360 / vw, 200 / vh, 1) || 1;
+      canvas.width = Math.max(1, Math.round(vw * scale));
+      canvas.height = Math.max(1, Math.round(vh * scale));
+      try {
+        canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+        img.src = canvas.toDataURL('image/jpeg', 0.7);
+      } catch {}
+    }
+
     function pump() {
       if (busy || !metaReady || destroyed) return;
       const keys = Object.keys(queue);
@@ -881,27 +692,32 @@
       const key = keys[0];
       const { time, img } = queue[key];
       delete queue[key];
+      const target = Math.max(0, Math.min(time, dur - 0.04));
+
+      // Already parked on (basically) this frame — drawing now avoids waiting
+      // for a 'seeked' event that won't fire when currentTime doesn't change.
+      if (Math.abs(v.currentTime - target) < 0.02 && v.readyState >= 2) {
+        draw(img);
+        pump();
+        return;
+      }
+
       busy = true;
-      const onSeeked = () => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
         v.removeEventListener('seeked', onSeeked);
-        if (!destroyed) {
-          const scale = Math.min(360 / vw, 200 / vh, 1) || 1;
-          canvas.width = Math.max(1, Math.round(vw * scale));
-          canvas.height = Math.max(1, Math.round(vh * scale));
-          try {
-            canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
-            img.src = canvas.toDataURL('image/jpeg', 0.7);
-          } catch {}
-        }
+        clearTimeout(tid);
+        draw(img);
         busy = false;
         pump();
       };
+      const onSeeked = finish;
       v.addEventListener('seeked', onSeeked);
-      try { v.currentTime = Math.max(0, Math.min(time, dur - 0.01)); }
-      catch { v.removeEventListener('seeked', onSeeked); busy = false; }
-      setTimeout(() => {
-        if (busy) { v.removeEventListener('seeked', onSeeked); busy = false; pump(); }
-      }, 2500);
+      const tid = setTimeout(finish, 1000); // fallback draws best-effort, never hangs
+      try { v.currentTime = target; }
+      catch { finish(); }
     }
 
     v.onloadedmetadata = () => {
@@ -920,6 +736,11 @@
     $('preview-' + id).classList.toggle('active', !!on);
   }
 
+  // Remembers the last seek time per preview so changing one control doesn't
+  // re-seek (and visibly flicker) the others sharing the same video element.
+  const cutLast = { start: null, end: null, intro: null };
+  function resetCutPreviews() { cutLast.start = cutLast.end = cutLast.intro = null; }
+
   function updateCutPreviews() {
     const splice = state.tab === 'splice';
     const r = resolveLengths();
@@ -927,32 +748,37 @@
     // Cut from start of video 1 → first kept frame
     if (state.file1 && state.prev1 && r.trimStart1 > 0) {
       showCutPreview('trim-start', true);
-      state.prev1.request('start', r.trimStart1, $('img-trim-start'));
+      const t = r.trimStart1;
+      if (cutLast.start !== t) { cutLast.start = t; state.prev1.request('start', t, $('img-trim-start')); }
       $('cap-trim-start').textContent =
-        `Kept from ${r.trimStart1.toFixed(1)}s — this is the first frame kept; everything before it is removed.`;
+        `Kept from ${t.toFixed(1)}s — this is the first frame kept; everything before it is removed.`;
     } else {
       showCutPreview('trim-start', false);
+      cutLast.start = null;
     }
 
     // Cut from end of video 1 (splice) → first removed frame
     if (splice && state.file1 && state.prev1 && r.trimEnd1 > 0) {
       const t = Math.max(0, state.duration1 - r.trimEnd1);
       showCutPreview('trim', true);
-      state.prev1.request('end', t, $('img-trim'));
+      if (cutLast.end !== t) { cutLast.end = t; state.prev1.request('end', t, $('img-trim')); }
       $('cap-trim').textContent =
         `Cut at ${t.toFixed(1)}s — this frame and everything after it is removed. Scrub until the flash's first frame shows here.`;
     } else {
       showCutPreview('trim', false);
+      cutLast.end = null;
     }
 
     // Move start of video 2 to intro (splice) → first frame after the intro
     if (splice && state.file2 && state.prev2 && r.intro2 > 0) {
+      const t = r.intro2;
       showCutPreview('intro', true);
-      state.prev2.request('intro', r.intro2, $('img-intro'));
+      if (cutLast.intro !== t) { cutLast.intro = t; state.prev2.request('intro', t, $('img-intro')); }
       $('cap-intro').textContent =
-        `First ${r.intro2.toFixed(1)}s becomes the intro; the main timelapse resumes from this frame.`;
+        `First ${t.toFixed(1)}s becomes the intro; the main timelapse resumes from this frame.`;
     } else {
       showCutPreview('intro', false);
+      cutLast.intro = null;
     }
   }
 
@@ -968,7 +794,6 @@
     $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
     $('trim-start-target').textContent = splice ? 'first video' : 'video';
     updateLengthDesc();
-    renderTimelines();
     updateCutPreviews();
   }
 
@@ -1058,7 +883,7 @@
     updateLengthDesc();
   });
   ['trim', 'trim-start', 'intro', 'length1', 'length2'].forEach(id => {
-    $(id).addEventListener('input', () => { updateLengthDesc(); renderTimelines(); updateCutPreviews(); });
+    $(id).addEventListener('input', () => { updateLengthDesc(); updateCutPreviews(); });
   });
 
   $('deflicker').addEventListener('change', () => {
@@ -1427,6 +1252,7 @@
       hasSecond && { label: 'Reading second video', weight: 0.5 },
       wantDeflicker1 && { label: splice ? 'Analyzing first video for flicker' : 'Analyzing video for flicker', weight: d1 * 0.04 },
       // "Removing N flicker frames" for v1 inserted dynamically if flickers are found
+      (wantDeflicker && hasIntro) && { label: 'Splitting second video', weight: v2Rest * 0.45 },
       wantDeflicker && { label: 'Analyzing second video for flicker', weight: d2 * 0.04 },
       // "Removing N flicker frames" for v2 inserted dynamically if flickers are found
       hasIntro && { label: 'Building intro from second video', weight: introUserVal * 0.45 },
@@ -1489,34 +1315,49 @@
         }
       }
 
-      // optional: deflicker v2 (run before resolveLengths so speed math uses new duration)
-      let v2Src = 'in2.mp4';
+      // ---- video 2: split the intro off the ORIGINAL timeline first (so it
+      // stays aligned with the preview), then deflicker only the rest. If we
+      // deflickered the whole clip first, the removed frames would shift time
+      // and the intro would pull in far more of the video than intended. ----
+      const introRaw = hasSecond
+        ? Math.max(0, Math.min(parseFloat($('intro').value) || 0, state.duration2 - 0.1))
+        : 0;
+      let restSrc = 'in2.mp4';   // the main timelapse (everything after the intro)
+      let restSeek = 0;          // -ss applied to restSrc when it isn't pre-split
+      let restDur = state.duration2;
       let effDur2 = state.duration2;
-      if (wantDeflicker) {
-        nextStep(); // Analyzing second video for flicker
-        const sens = parseInt($('deflicker-sens').value, 10);
-        const dfl = await runDeflicker('in2.mp4', 'in2_dfl.mp4', sens, {
-          skipped: (reason) => {
-            insertStepAfterCurrent(reason, 0.01);
-            nextStep();
-            markCurrentStepDone();
-          },
-          beginRemove: (count) => {
-            insertStepAfterCurrent(`Removing ${count} flicker frames from second video`, d2 * 0.06);
-            nextStep();
-          },
-        });
-        if (dfl.aborted) {
-          $('error').textContent = 'Deflicker (second video) aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
-          setProgress('');
-          return;
-        }
-        if (dfl.count > 0) {
-          v2Src = 'in2_dfl.mp4';
-          const blob = new Blob([ffmpeg.FS('readFile', v2Src).buffer], { type: 'video/mp4' });
-          const tmpFile = new File([blob], v2Src);
-          const dflProps = await getVideoProps(tmpFile);
-          effDur2 = dflProps.duration;
+
+      if (hasSecond) {
+        if (wantDeflicker) {
+          if (introRaw > 0) {
+            nextStep(); // Splitting second video
+            await ffmpeg.run(
+              '-ss', introRaw.toFixed(3), '-i', 'in2.mp4', '-an',
+              '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+              'in2_rest.mp4'
+            );
+            restSrc = 'in2_rest.mp4';
+          }
+          nextStep(); // Analyzing second video for flicker
+          const sens = parseInt($('deflicker-sens').value, 10);
+          const dfl = await runDeflicker(restSrc, 'in2_rest_dfl.mp4', sens, {
+            skipped: (reason) => { insertStepAfterCurrent(reason, 0.01); nextStep(); markCurrentStepDone(); },
+            beginRemove: (count) => { insertStepAfterCurrent(`Removing ${count} flicker frames from second video`, d2 * 0.06); nextStep(); },
+          });
+          if (dfl.aborted) {
+            $('error').textContent = 'Deflicker (second video) aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
+            setProgress('');
+            return;
+          }
+          if (dfl.count > 0) restSrc = 'in2_rest_dfl.mp4';
+          restDur = (await getVideoProps(fsToFile(restSrc))).duration;
+          restSeek = 0;
+          effDur2 = introRaw + restDur;
+        } else {
+          restSrc = 'in2.mp4';
+          restSeek = introRaw;
+          restDur = Math.max(0.1, state.duration2 - introRaw);
+          effDur2 = state.duration2;
         }
       }
 
@@ -1525,16 +1366,15 @@
       const setpts1 = Math.abs(speed1 - 1) < 0.001 ? '' : `setpts=PTS*${speed1.toFixed(6)},`;
       const setpts2 = Math.abs(speed2 - 1) < 0.001 ? '' : `setpts=PTS*${speed2.toFixed(6)},`;
       const trimmedDur1 = Math.max(0.1, effDur1 - trimStart1 - trimEnd1);
-      const restDur2eff = Math.max(0.1, effDur2 - intro2);
 
       const parts = [];
 
-      // 1) intro: first intro2 seconds of v2 (deflickered if enabled), moved to the start
-      if (hasIntro && intro2 > 0) {
+      // 1) intro: first introRaw seconds of the ORIGINAL v2, moved to the start
+      if (hasIntro && introRaw > 0) {
         nextStep(); // Building intro from second video
         await ffmpeg.run(
-          '-t', intro2.toFixed(3),
-          '-i', v2Src,
+          '-t', introRaw.toFixed(3),
+          '-i', 'in2.mp4',
           '-vf', `${setpts2}${baseFilter}`,
           '-an',
           ...baseEncode,
@@ -1556,26 +1396,22 @@
       );
       parts.push('p1.mp4');
 
-      // 3) second video: skip intro2, take the rest, normalize, speed
+      // 3) second video: the rest (main timelapse), normalize, speed
       if (hasSecond) {
         nextStep(); // Normalizing second video
-        await ffmpeg.run(
-          '-ss', intro2.toFixed(3),
-          '-t', restDur2eff.toFixed(3),
-          '-i', v2Src,
-          '-vf', `${setpts2}${baseFilter}`,
-          '-an',
-          ...baseEncode,
-          'p2.mp4'
-        );
+        const restArgs = [];
+        if (restSeek > 0) restArgs.push('-ss', restSeek.toFixed(3));
+        restArgs.push('-t', restDur.toFixed(3), '-i', restSrc, '-vf', `${setpts2}${baseFilter}`,
+          '-an', ...baseEncode, 'p2.mp4');
+        await ffmpeg.run(...restArgs);
         parts.push('p2.mp4');
       }
 
-      // extract last frame from the deflickered/original v2 (or v1 in add mode)
+      // extract last frame (finished art) from the rest's end (or v1 in add mode)
       if (addFlash || hold > 0) {
         nextStep(); // Capturing final frame
-        const lastSrc = hasSecond ? v2Src : v1Src;
-        const lastSrcDur = hasSecond ? effDur2 : (effDur1 - trimEnd1);
+        const lastSrc = hasSecond ? restSrc : v1Src;
+        const lastSrcDur = hasSecond ? (restSeek + restDur) : (effDur1 - trimEnd1);
         const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
         await ffmpeg.run(
           '-ss', lastFrameTime.toFixed(3),
@@ -1640,7 +1476,7 @@
       updateSidePlaceholder();
 
       // cleanup
-      ['in1.mp4','in2.mp4','in1_dfl.mp4','in2_dfl.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
+      ['in1.mp4','in2.mp4','in1_dfl.mp4','in2_rest.mp4','in2_rest_dfl.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
         try { ffmpeg.FS('unlink', f); } catch {}
       });
     } catch (e) {
@@ -1651,6 +1487,11 @@
       $('go').disabled = false;
     }
   });
+
+  function fsToFile(name) {
+    const blob = new Blob([ffmpeg.FS('readFile', name).buffer], { type: 'video/mp4' });
+    return new File([blob], name);
+  }
 
   function getVideoProps(file) {
     return new Promise((resolve, reject) => {
