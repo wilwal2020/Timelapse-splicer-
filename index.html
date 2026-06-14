@@ -443,6 +443,30 @@
   }
   .timeline-legend .lg.intro::before { background: rgba(107, 138, 253, 0.6); }
   .timeline-legend .lg.keep::before { border: 1px solid var(--border); }
+  .cut-preview { display: none; margin: -2px 0 14px; }
+  .cut-preview.active { display: block; }
+  .cut-preview-frame {
+    display: inline-block;
+    line-height: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: #000;
+    max-width: 100%;
+  }
+  .cut-preview-frame img {
+    max-width: 100%;
+    max-height: 200px;
+    display: block;
+  }
+  .cut-preview-frame:empty,
+  .cut-preview-frame img:not([src]) { min-height: 0; }
+  .cut-preview-cap {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    line-height: 1.4;
+  }
 </style>
 </head>
 <body>
@@ -517,6 +541,10 @@
       <input type="number" id="trim-start" min="0" max="60" step="0.1" value="0">
       <span class="unit">sec</span>
     </div>
+    <div class="cut-preview" id="preview-trim-start">
+      <div class="cut-preview-frame"><img id="img-trim-start" alt=""></div>
+      <div class="cut-preview-cap" id="cap-trim-start"></div>
+    </div>
     <div class="row splice-only" id="trim-row">
       <div style="flex:1">
         <label for="trim">Cut from end of first video</label>
@@ -525,6 +553,10 @@
       <input type="number" id="trim" min="0" max="30" step="0.1" value="2">
       <span class="unit">sec</span>
     </div>
+    <div class="cut-preview splice-only" id="preview-trim">
+      <div class="cut-preview-frame"><img id="img-trim" alt=""></div>
+      <div class="cut-preview-cap" id="cap-trim"></div>
+    </div>
     <div class="row splice-only" id="intro-row">
       <div style="flex:1">
         <label for="intro">Move start of second video to intro</label>
@@ -532,6 +564,10 @@
       </div>
       <input type="number" id="intro" min="0" max="30" step="0.1" value="0">
       <span class="unit">sec</span>
+    </div>
+    <div class="cut-preview splice-only" id="preview-intro">
+      <div class="cut-preview-frame"><img id="img-intro" alt=""></div>
+      <div class="cut-preview-cap" id="cap-intro"></div>
     </div>
     <div class="row">
       <div style="flex:1">
@@ -614,7 +650,7 @@
 
   let ffmpeg = null;
   let fetchFile = null;
-  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, thumbs1: null, thumbs2: null };
+  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, thumbs1: null, thumbs2: null, prev1: null, prev2: null };
   const $ = id => document.getElementById(id);
 
   const DEFAULT_INFO = {
@@ -648,6 +684,7 @@
     const dropId = 'drop' + n;
     const infoId = 'info' + n;
     const lengthId = 'length' + n;
+    if (state['prev' + n]) { state['prev' + n].destroy(); state['prev' + n] = null; }
     $(dropId).classList.remove('loaded');
     $(key).value = '';
     $(lengthId).value = '';
@@ -683,6 +720,8 @@
     const n = key === 'file1' ? '1' : '2';
     state[key] = file;
     state['thumbs' + n] = null;
+    if (state['prev' + n]) { state['prev' + n].destroy(); }
+    state['prev' + n] = createPreviewer(file);
     $('strip' + n).dataset.built = '';
     drop.classList.add('loaded');
     // probe duration
@@ -822,6 +861,101 @@
     legend.innerHTML = parts.join('');
   }
 
+  // Persistent per-file seeker that draws a chosen frame into a target <img>.
+  // Seeks are serialized and coalesced so fast scrubbing stays responsive.
+  function createPreviewer(file) {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.muted = true;
+    v.preload = 'auto';
+    v.src = url;
+    const canvas = document.createElement('canvas');
+    let metaReady = false, dur = 0, vw = 0, vh = 0;
+    let busy = false, destroyed = false;
+    const queue = {}; // key -> { time, img }
+
+    function pump() {
+      if (busy || !metaReady || destroyed) return;
+      const keys = Object.keys(queue);
+      if (!keys.length) return;
+      const key = keys[0];
+      const { time, img } = queue[key];
+      delete queue[key];
+      busy = true;
+      const onSeeked = () => {
+        v.removeEventListener('seeked', onSeeked);
+        if (!destroyed) {
+          const scale = Math.min(360 / vw, 200 / vh, 1) || 1;
+          canvas.width = Math.max(1, Math.round(vw * scale));
+          canvas.height = Math.max(1, Math.round(vh * scale));
+          try {
+            canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+            img.src = canvas.toDataURL('image/jpeg', 0.7);
+          } catch {}
+        }
+        busy = false;
+        pump();
+      };
+      v.addEventListener('seeked', onSeeked);
+      try { v.currentTime = Math.max(0, Math.min(time, dur - 0.01)); }
+      catch { v.removeEventListener('seeked', onSeeked); busy = false; }
+      setTimeout(() => {
+        if (busy) { v.removeEventListener('seeked', onSeeked); busy = false; pump(); }
+      }, 2500);
+    }
+
+    v.onloadedmetadata = () => {
+      dur = v.duration; vw = v.videoWidth; vh = v.videoHeight;
+      metaReady = true;
+      pump();
+    };
+
+    return {
+      request(key, time, img) { queue[key] = { time, img }; pump(); },
+      destroy() { destroyed = true; try { URL.revokeObjectURL(url); } catch {} v.removeAttribute('src'); },
+    };
+  }
+
+  function showCutPreview(id, on) {
+    $('preview-' + id).classList.toggle('active', !!on);
+  }
+
+  function updateCutPreviews() {
+    const splice = state.tab === 'splice';
+    const r = resolveLengths();
+
+    // Cut from start of video 1 → first kept frame
+    if (state.file1 && state.prev1 && r.trimStart1 > 0) {
+      showCutPreview('trim-start', true);
+      state.prev1.request('start', r.trimStart1, $('img-trim-start'));
+      $('cap-trim-start').textContent =
+        `Kept from ${r.trimStart1.toFixed(1)}s — this is the first frame kept; everything before it is removed.`;
+    } else {
+      showCutPreview('trim-start', false);
+    }
+
+    // Cut from end of video 1 (splice) → first removed frame
+    if (splice && state.file1 && state.prev1 && r.trimEnd1 > 0) {
+      const t = Math.max(0, state.duration1 - r.trimEnd1);
+      showCutPreview('trim', true);
+      state.prev1.request('end', t, $('img-trim'));
+      $('cap-trim').textContent =
+        `Cut at ${t.toFixed(1)}s — this frame and everything after it is removed. Scrub until the flash's first frame shows here.`;
+    } else {
+      showCutPreview('trim', false);
+    }
+
+    // Move start of video 2 to intro (splice) → first frame after the intro
+    if (splice && state.file2 && state.prev2 && r.intro2 > 0) {
+      showCutPreview('intro', true);
+      state.prev2.request('intro', r.intro2, $('img-intro'));
+      $('cap-intro').textContent =
+        `First ${r.intro2.toFixed(1)}s becomes the intro; the main timelapse resumes from this frame.`;
+    } else {
+      showCutPreview('intro', false);
+    }
+  }
+
   function updateModeUI() {
     const splice = state.tab === 'splice';
     document.querySelectorAll('.splice-only').forEach(el => {
@@ -835,6 +969,7 @@
     $('trim-start-target').textContent = splice ? 'first video' : 'video';
     updateLengthDesc();
     renderTimelines();
+    updateCutPreviews();
   }
 
   function resolveLengths(opts) {
@@ -923,7 +1058,7 @@
     updateLengthDesc();
   });
   ['trim', 'trim-start', 'intro', 'length1', 'length2'].forEach(id => {
-    $(id).addEventListener('input', () => { updateLengthDesc(); renderTimelines(); });
+    $(id).addEventListener('input', () => { updateLengthDesc(); renderTimelines(); updateCutPreviews(); });
   });
 
   $('deflicker').addEventListener('change', () => {
