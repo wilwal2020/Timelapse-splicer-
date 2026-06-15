@@ -399,27 +399,76 @@
   .cut-preview.collapsed .cut-preview-toggle::after { content: 'Show preview'; }
   .cut-preview-body { margin-top: 6px; }
   .cut-preview.collapsed .cut-preview-body { display: none; }
-  .cut-preview-frame {
-    display: inline-block;
+  .cut-frames {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  .cut-frame {
+    flex: 1 1 0;
+    min-width: 0;
+    text-align: center;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+  }
+  .cut-frame.is-cut { opacity: 1; }
+  .cut-frame .fimg {
     line-height: 0;
     border: 1px solid var(--border);
     border-radius: 6px;
     overflow: hidden;
     background: #000;
-    max-width: 100%;
   }
-  .cut-preview-frame img {
-    max-width: 100%;
-    max-height: 200px;
+  .cut-frame.is-cut .fimg {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .cut-frame img {
+    width: 100%;
+    max-height: 150px;
+    object-fit: contain;
     display: block;
+    background: #000;
   }
-  .cut-preview-frame:empty,
-  .cut-preview-frame img:not([src]) { min-height: 0; }
+  .cut-frame-label {
+    display: block;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+  .cut-frame.is-cut .cut-frame-label { color: var(--accent); }
   .cut-preview-cap {
     font-size: 11.5px;
     color: var(--text-dim);
-    margin-top: 6px;
+    margin-top: 8px;
     line-height: 1.4;
+  }
+  .stepper { display: flex; align-items: center; gap: 8px; }
+  .step-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+  }
+  .step-btn:hover { border-color: var(--accent); }
+  .step-btn:active { background: var(--accent); color: #fff; }
+  .step-val {
+    min-width: 56px;
+    text-align: center;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
   }
 </style>
 </head>
@@ -481,46 +530,70 @@
     <h2><span class="step" id="finish-step">3</span>Finish</h2>
     <div class="row" id="trim-start-row">
       <div style="flex:1">
-        <label for="trim-start">Cut from start of <span id="trim-start-target">first video</span></label>
+        <label>Cut from start of <span id="trim-start-target">first video</span></label>
         <div class="desc">Removes the CSP preview that shows the (incomplete) art</div>
       </div>
-      <input type="number" id="trim-start" min="0" max="60" step="0.1" value="0">
-      <span class="unit">sec</span>
+      <div class="stepper">
+        <button class="step-btn" type="button" data-target="trim-start" data-dir="-1" aria-label="step back">◀</button>
+        <span class="step-val" id="val-trim-start">0.00s</span>
+        <button class="step-btn" type="button" data-target="trim-start" data-dir="1" aria-label="step forward">▶</button>
+        <input type="hidden" id="trim-start" max="60" value="0">
+      </div>
     </div>
     <div class="cut-preview" id="preview-trim-start">
       <button class="cut-preview-toggle" type="button" data-pv="trim-start"></button>
       <div class="cut-preview-body">
-        <div class="cut-preview-frame"><img id="img-trim-start" alt=""></div>
+        <div class="cut-frames">
+          <div class="cut-frame"><div class="fimg"><img id="img-trim-start-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
+          <div class="cut-frame is-cut"><div class="fimg"><img id="img-trim-start" alt=""></div><span class="cut-frame-label">cut point</span></div>
+          <div class="cut-frame"><div class="fimg"><img id="img-trim-start-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+        </div>
         <div class="cut-preview-cap" id="cap-trim-start"></div>
       </div>
     </div>
     <div class="row splice-only" id="trim-row">
       <div style="flex:1">
-        <label for="trim">Cut from end of first video</label>
+        <label>Cut from end of first video</label>
         <div class="desc">Removes CSP's built-in final flash so it doesn't show mid-splice</div>
       </div>
-      <input type="number" id="trim" min="0" max="30" step="0.1" value="2">
-      <span class="unit">sec</span>
+      <div class="stepper">
+        <button class="step-btn" type="button" data-target="trim" data-dir="-1" aria-label="step back">◀</button>
+        <span class="step-val" id="val-trim">2.00s</span>
+        <button class="step-btn" type="button" data-target="trim" data-dir="1" aria-label="step forward">▶</button>
+        <input type="hidden" id="trim" max="30" value="2">
+      </div>
     </div>
     <div class="cut-preview splice-only" id="preview-trim">
       <button class="cut-preview-toggle" type="button" data-pv="trim"></button>
       <div class="cut-preview-body">
-        <div class="cut-preview-frame"><img id="img-trim" alt=""></div>
+        <div class="cut-frames">
+          <div class="cut-frame"><div class="fimg"><img id="img-trim-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
+          <div class="cut-frame is-cut"><div class="fimg"><img id="img-trim" alt=""></div><span class="cut-frame-label">cut point</span></div>
+          <div class="cut-frame"><div class="fimg"><img id="img-trim-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+        </div>
         <div class="cut-preview-cap" id="cap-trim"></div>
       </div>
     </div>
     <div class="row splice-only" id="intro-row">
       <div style="flex:1">
-        <label for="intro">Move start of second video to intro</label>
+        <label>Move start of second video to intro</label>
         <div class="desc" id="intro-desc">Shows the finished art briefly at the start, then plays the timelapse</div>
       </div>
-      <input type="number" id="intro" min="0" max="30" step="0.1" value="0">
-      <span class="unit">sec</span>
+      <div class="stepper">
+        <button class="step-btn" type="button" data-target="intro" data-dir="-1" aria-label="step back">◀</button>
+        <span class="step-val" id="val-intro">0.00s</span>
+        <button class="step-btn" type="button" data-target="intro" data-dir="1" aria-label="step forward">▶</button>
+        <input type="hidden" id="intro" max="30" value="0">
+      </div>
     </div>
     <div class="cut-preview splice-only" id="preview-intro">
       <button class="cut-preview-toggle" type="button" data-pv="intro"></button>
       <div class="cut-preview-body">
-        <div class="cut-preview-frame"><img id="img-intro" alt=""></div>
+        <div class="cut-frames">
+          <div class="cut-frame"><div class="fimg"><img id="img-intro-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
+          <div class="cut-frame is-cut"><div class="fimg"><img id="img-intro" alt=""></div><span class="cut-frame-label">resume point</span></div>
+          <div class="cut-frame"><div class="fimg"><img id="img-intro-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+        </div>
         <div class="cut-preview-cap" id="cap-intro"></div>
       </div>
     </div>
@@ -778,6 +851,13 @@
     });
   }
 
+  // Request the boundary frame plus the frame just before and after it.
+  function requestTriframe(prev, baseId, time) {
+    prev.request(baseId + '-prev', time - FRAME, $('img-' + baseId + '-prev'));
+    prev.request(baseId, time, $('img-' + baseId));
+    prev.request(baseId + '-next', time + FRAME, $('img-' + baseId + '-next'));
+  }
+
   function updateCutPreviews() {
     const splice = state.tab === 'splice';
     const r = resolveLengths();
@@ -786,9 +866,9 @@
     if (state.file1 && state.prev1 && r.trimStart1 > 0) {
       showCutPreview('trim-start', true);
       const t = r.trimStart1;
-      if (!collapsedSet.has('trim-start') && cutLast.start !== t) { cutLast.start = t; state.prev1.request('start', t, $('img-trim-start')); }
+      if (!collapsedSet.has('trim-start') && cutLast.start !== t) { cutLast.start = t; requestTriframe(state.prev1, 'trim-start', t); }
       $('cap-trim-start').textContent =
-        `Kept from ${t.toFixed(1)}s — this is the first frame kept; everything before it is removed.`;
+        `Kept from ${t.toFixed(2)}s — the middle frame is the first one kept; everything before it is removed.`;
     } else {
       showCutPreview('trim-start', false);
       cutLast.start = null;
@@ -798,9 +878,9 @@
     if (splice && state.file1 && state.prev1 && r.trimEnd1 > 0) {
       const t = Math.max(0, state.duration1 - r.trimEnd1);
       showCutPreview('trim', true);
-      if (!collapsedSet.has('trim') && cutLast.end !== t) { cutLast.end = t; state.prev1.request('end', t, $('img-trim')); }
+      if (!collapsedSet.has('trim') && cutLast.end !== t) { cutLast.end = t; requestTriframe(state.prev1, 'trim', t); }
       $('cap-trim').textContent =
-        `Cut at ${t.toFixed(1)}s — this frame and everything after it is removed. Scrub until the flash's first frame shows here.`;
+        `Cut at ${t.toFixed(2)}s — the middle frame and everything after it is removed. Scrub until the flash's first frame is the middle one.`;
     } else {
       showCutPreview('trim', false);
       cutLast.end = null;
@@ -810,9 +890,9 @@
     if (splice && state.file2 && state.prev2 && r.intro2 > 0) {
       const t = r.intro2;
       showCutPreview('intro', true);
-      if (!collapsedSet.has('intro') && cutLast.intro !== t) { cutLast.intro = t; state.prev2.request('intro', t, $('img-intro')); }
+      if (!collapsedSet.has('intro') && cutLast.intro !== t) { cutLast.intro = t; requestTriframe(state.prev2, 'intro', t); }
       $('cap-intro').textContent =
-        `First ${t.toFixed(1)}s becomes the intro; the main timelapse resumes from this frame.`;
+        `First ${t.toFixed(2)}s becomes the intro; the main timelapse resumes from the middle frame.`;
     } else {
       showCutPreview('intro', false);
       cutLast.intro = null;
@@ -830,6 +910,52 @@
   });
   applyCollapsed();
 
+  // ---- frame-step controls (◀ ▶) for the cut points ----
+  const FRAME = 1 / 30; // assume ~30fps source; one button press = one frame
+
+  function controlMax(id) {
+    const maxAttr = parseFloat($(id).max) || Infinity;
+    const dur = (id === 'intro') ? state.duration2 : state.duration1;
+    const durCap = dur > 0 ? dur - 0.04 : Infinity;
+    return Math.min(maxAttr, durCap);
+  }
+  function setControl(id, val) {
+    const hi = controlMax(id);
+    const clamped = Math.max(0, Math.min(val, isFinite(hi) ? hi : val));
+    $(id).value = clamped.toFixed(3);
+    $(id).dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  function stepControl(id, frames) {
+    setControl(id, (parseFloat($(id).value) || 0) + frames * FRAME);
+  }
+  function syncStepperLabels() {
+    ['trim-start', 'trim', 'intro'].forEach(id => {
+      const el = $('val-' + id);
+      if (el) el.textContent = (parseFloat($(id).value) || 0).toFixed(2) + 's';
+    });
+  }
+
+  document.querySelectorAll('.step-btn').forEach(btn => {
+    const id = btn.dataset.target, dir = parseInt(btn.dataset.dir, 10);
+    let timer = null, ticks = 0;
+    const tick = () => {
+      ticks++;
+      const mult = ticks > 24 ? 8 : ticks > 12 ? 3 : 1; // accelerate while held
+      stepControl(id, dir * mult);
+    };
+    const start = e => {
+      e.preventDefault();
+      stepControl(id, dir);
+      ticks = 0;
+      clearInterval(timer);
+      timer = setInterval(tick, 90);
+    };
+    const stop = () => { clearInterval(timer); timer = null; };
+    btn.addEventListener('mousedown', start);
+    btn.addEventListener('touchstart', start, { passive: false });
+    ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => btn.addEventListener(ev, stop));
+  });
+
   function updateModeUI() {
     const splice = state.tab === 'splice';
     document.querySelectorAll('.splice-only').forEach(el => {
@@ -841,6 +967,7 @@
       : 'Add a clean flash and a final hold to a timelapse that does not already have a built-in flash.';
     $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
     $('trim-start-target').textContent = splice ? 'first video' : 'video';
+    syncStepperLabels();
     updateLengthDesc();
     updateCutPreviews();
   }
@@ -931,7 +1058,7 @@
     updateLengthDesc();
   });
   ['trim', 'trim-start', 'intro', 'length1', 'length2'].forEach(id => {
-    $(id).addEventListener('input', () => { updateLengthDesc(); updateCutPreviews(); });
+    $(id).addEventListener('input', () => { syncStepperLabels(); updateLengthDesc(); updateCutPreviews(); });
   });
 
   $('deflicker').addEventListener('change', () => {
