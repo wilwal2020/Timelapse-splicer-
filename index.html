@@ -937,7 +937,7 @@
 
   document.querySelectorAll('.step-btn').forEach(btn => {
     const id = btn.dataset.target, dir = parseInt(btn.dataset.dir, 10);
-    let timer = null, ticks = 0;
+    let holdTimeout = null, repeatTimer = null, ticks = 0;
     const tick = () => {
       ticks++;
       const mult = ticks > 24 ? 8 : ticks > 12 ? 3 : 1; // accelerate while held
@@ -945,12 +945,18 @@
     };
     const start = e => {
       e.preventDefault();
-      stepControl(id, dir);
+      stepControl(id, dir); // exactly one step per press
       ticks = 0;
-      clearInterval(timer);
-      timer = setInterval(tick, 90);
+      clearTimeout(holdTimeout);
+      clearInterval(repeatTimer);
+      // only begin auto-repeat if the button is held past the initial delay
+      holdTimeout = setTimeout(() => { repeatTimer = setInterval(tick, 80); }, 400);
     };
-    const stop = () => { clearInterval(timer); timer = null; };
+    const stop = () => {
+      clearTimeout(holdTimeout);
+      clearInterval(repeatTimer);
+      holdTimeout = repeatTimer = null;
+    };
     btn.addEventListener('mousedown', start);
     btn.addEventListener('touchstart', start, { passive: false });
     ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => btn.addEventListener(ev, stop));
