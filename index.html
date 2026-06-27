@@ -496,6 +496,18 @@
   }
   .mark-btn:hover { border-color: var(--accent); }
   .mark-btn:active { background: var(--accent); color: #fff; }
+  .finish-h2 { display: flex; align-items: center; }
+  .skip-toggle {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-dim);
+    cursor: pointer;
+  }
+  .skip-toggle input { accent-color: var(--accent); margin: 0; }
 </style>
 </head>
 <body>
@@ -555,11 +567,7 @@
   </div>
 
   <div class="card" data-tabs="splice add">
-    <h2><span class="step" id="finish-step">3</span>Finish</h2>
-    <div class="checkbox-row splice-only" id="skip-finish-row">
-      <input type="checkbox" id="skip-finish">
-      <label for="skip-finish">Just splice — skip trimming, flash, hold &amp; length changes</label>
-    </div>
+    <h2 class="finish-h2"><span class="step" id="finish-step">3</span>Finish<label class="skip-toggle splice-only" id="skip-finish-row" title="Skip trimming, flash, hold &amp; length changes — just splice the two videos"><input type="checkbox" id="skip-finish">Skip</label></h2>
     <div id="finish-body">
     <div class="row" id="trim-start-row">
       <div style="flex:1">
