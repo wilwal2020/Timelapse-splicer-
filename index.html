@@ -470,6 +470,32 @@
     font-variant-numeric: tabular-nums;
     color: var(--text);
   }
+  .edit-scrub-row { display: flex; align-items: center; gap: 10px; }
+  #edit-scrub {
+    flex: 1;
+    accent-color: var(--accent);
+    height: 22px;
+  }
+  .edit-pos {
+    text-align: center;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    margin: 6px 0 12px;
+  }
+  .mark-btn {
+    flex: 1;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 9px;
+    font-size: 13px;
+    font-family: inherit;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .mark-btn:hover { border-color: var(--accent); }
+  .mark-btn:active { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
@@ -480,11 +506,13 @@
   <div class="tabs">
     <button class="tab active" data-tab="splice" type="button">Splice two videos</button>
     <button class="tab" data-tab="add" type="button">Add flash &amp; hold</button>
+    <button class="tab" data-tab="images" type="button">Images → video</button>
+    <button class="tab" data-tab="trim" type="button">Trim video</button>
   </div>
 
   <div class="layout">
   <div class="main">
-  <div class="card">
+  <div class="card" data-tabs="splice add">
     <h2><span class="step">1</span><span id="card1-title">First video (e.g. Clip Studio Paint)</span></h2>
     <div class="drop" id="drop1">
       <button class="remove" data-target="file1" type="button" title="Remove video">×</button>
@@ -526,8 +554,13 @@
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tabs="splice add">
     <h2><span class="step" id="finish-step">3</span>Finish</h2>
+    <div class="checkbox-row splice-only" id="skip-finish-row">
+      <input type="checkbox" id="skip-finish">
+      <label for="skip-finish">Just splice — skip trimming, flash, hold &amp; length changes</label>
+    </div>
+    <div id="finish-body">
     <div class="row" id="trim-start-row">
       <div style="flex:1">
         <label>Cut from start of <span id="trim-start-target">first video</span></label>
@@ -633,6 +666,61 @@
       <input type="checkbox" id="flash" checked>
       <label for="flash">Add a CSP-style flash before the final hold</label>
     </div>
+    </div><!-- /finish-body -->
+  </div>
+
+  <!-- Images → video -->
+  <div class="card" data-tabs="images">
+    <h2><span class="step">1</span>Images</h2>
+    <div class="drop" id="drop-images">
+      <button class="remove" id="remove-images" type="button" title="Clear images">×</button>
+      <input type="file" id="file-images" accept="image/*" multiple>
+      <div id="info-images">Click to choose or drag your image frames here (select all at once)</div>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="img-dedupe">
+      <label for="img-dedupe">Remove exact duplicate frames (identical consecutive images)</label>
+    </div>
+  </div>
+  <div class="card" data-tabs="images">
+    <h2><span class="step">2</span>Output</h2>
+    <div class="row">
+      <div style="flex:1">
+        <label for="img-length">Timelapse length</label>
+        <div class="desc" id="img-length-desc">How long the finished video should be</div>
+      </div>
+      <input type="number" id="img-length" min="0.5" max="3600" step="0.5" value="10">
+      <span class="unit">sec</span>
+    </div>
+  </div>
+
+  <!-- Trim video -->
+  <div class="card" data-tabs="trim">
+    <h2><span class="step">1</span>Video to trim</h2>
+    <div class="drop" id="drop-edit">
+      <button class="remove" id="remove-edit" type="button" title="Remove video">×</button>
+      <input type="file" id="file-edit" accept="video/*">
+      <div id="info-edit">Click to choose or drag a video here</div>
+    </div>
+  </div>
+  <div class="card" data-tabs="trim" id="edit-controls" style="display:none">
+    <h2><span class="step">2</span>Choose the part to keep</h2>
+    <div class="edit-scrub-row">
+      <button class="step-btn" type="button" id="edit-back" aria-label="step back">◀</button>
+      <input type="range" id="edit-scrub" min="0" max="1000" value="0" step="1">
+      <button class="step-btn" type="button" id="edit-fwd" aria-label="step forward">▶</button>
+    </div>
+    <div class="edit-pos" id="edit-pos">0.00s</div>
+    <div class="cut-frames" id="edit-frames">
+      <div class="cut-frame"><div class="fimg"><img id="img-edit-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
+      <div class="cut-frame is-cut"><div class="fimg"><img id="img-edit" alt=""></div><span class="cut-frame-label">playhead</span></div>
+      <div class="cut-frame"><div class="fimg"><img id="img-edit-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="mark-btn" type="button" id="edit-set-start">Set start here</button>
+      <button class="mark-btn" type="button" id="edit-set-end">Set end here</button>
+    </div>
+    <div class="cut-preview-cap" id="edit-range-cap" style="margin-top:10px"></div>
   </div>
 
   <button class="primary" id="go" disabled>Loading FFmpeg…</button>
@@ -678,7 +766,11 @@
 
   let ffmpeg = null;
   let fetchFile = null;
-  const state = { file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, prev1: null, prev2: null };
+  const state = {
+    file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, prev1: null, prev2: null,
+    images: [],
+    editFile: null, editDur: 0, editPrev: null, editPos: 0, editIn: 0, editOut: 0,
+  };
   const $ = id => document.getElementById(id);
 
   const DEFAULT_INFO = {
@@ -718,7 +810,7 @@
     checkReady();
   }
 
-  document.querySelectorAll('.remove').forEach(btn => {
+  document.querySelectorAll('.remove[data-target]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       removeFile(btn.dataset.target);
@@ -935,21 +1027,21 @@
     });
   }
 
-  document.querySelectorAll('.step-btn').forEach(btn => {
-    const id = btn.dataset.target, dir = parseInt(btn.dataset.dir, 10);
+  // Reusable press-and-hold: one step per tap; auto-repeats (accelerating)
+  // only after a 400ms hold so a quick click moves exactly one frame.
+  function attachHold(btn, onStep) {
     let holdTimeout = null, repeatTimer = null, ticks = 0;
     const tick = () => {
       ticks++;
-      const mult = ticks > 24 ? 8 : ticks > 12 ? 3 : 1; // accelerate while held
-      stepControl(id, dir * mult);
+      const mult = ticks > 24 ? 8 : ticks > 12 ? 3 : 1;
+      onStep(mult);
     };
     const start = e => {
       e.preventDefault();
-      stepControl(id, dir); // exactly one step per press
+      onStep(1);
       ticks = 0;
       clearTimeout(holdTimeout);
       clearInterval(repeatTimer);
-      // only begin auto-repeat if the button is held past the initial delay
       holdTimeout = setTimeout(() => { repeatTimer = setInterval(tick, 80); }, 400);
     };
     const stop = () => {
@@ -960,17 +1052,278 @@
     btn.addEventListener('mousedown', start);
     btn.addEventListener('touchstart', start, { passive: false });
     ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => btn.addEventListener(ev, stop));
+  }
+
+  document.querySelectorAll('.step-btn[data-target]').forEach(btn => {
+    const id = btn.dataset.target, dir = parseInt(btn.dataset.dir, 10);
+    attachHold(btn, mult => stepControl(id, dir * mult));
   });
 
+  // ---------- Images → video ----------
+  function naturalCompare(a, b) {
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+  }
+  function imageDims(file) {
+    return new Promise((res, rej) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => { res({ w: img.naturalWidth, h: img.naturalHeight }); URL.revokeObjectURL(url); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Could not read the first image')); };
+      img.src = url;
+    });
+  }
+  function sameBytes(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+  function addImages(fileList) {
+    const incoming = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+    if (!incoming.length) return;
+    const seen = new Set(state.images.map(f => f.name + ':' + f.size));
+    for (const f of incoming) {
+      const k = f.name + ':' + f.size;
+      if (!seen.has(k)) { seen.add(k); state.images.push(f); }
+    }
+    state.images.sort(naturalCompare);
+    const imgs = state.images;
+    $('drop-images').classList.add('loaded');
+    const totalMB = (imgs.reduce((s, f) => s + f.size, 0) / 1024 / 1024).toFixed(1);
+    $('info-images').innerHTML =
+      `<div class="filename">${imgs.length} images</div><div class="meta">${imgs[0].name} … ${imgs[imgs.length - 1].name} · ${totalMB} MB</div>`;
+    checkReady();
+  }
+  function clearImages() {
+    state.images = [];
+    $('file-images').value = '';
+    $('drop-images').classList.remove('loaded');
+    $('info-images').textContent = 'Click to choose or drag your image frames here (select all at once)';
+    checkReady();
+  }
+  (function setupImages() {
+    const drop = $('drop-images'), input = $('file-images');
+    drop.addEventListener('click', e => { if (e.target.id === 'remove-images') return; input.click(); });
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); addImages(e.dataTransfer.files); });
+    input.addEventListener('change', e => addImages(e.target.files));
+    $('remove-images').addEventListener('click', e => { e.stopPropagation(); clearImages(); });
+  })();
+
+  // ---------- Trim video ----------
+  const EDIT_RANGE = 1000;
+  let editLast = null;
+  function setEditPos(t) {
+    if (!state.editDur) return;
+    t = Math.max(0, Math.min(t, state.editDur));
+    state.editPos = t;
+    $('edit-pos').textContent = t.toFixed(2) + 's / ' + state.editDur.toFixed(2) + 's';
+    $('edit-scrub').value = Math.round(t / state.editDur * EDIT_RANGE) || 0;
+    if (state.editPrev && editLast !== t) {
+      editLast = t;
+      state.editPrev.request('edit-prev', t - FRAME, $('img-edit-prev'));
+      state.editPrev.request('edit', t, $('img-edit'));
+      state.editPrev.request('edit-next', t + FRAME, $('img-edit-next'));
+    }
+  }
+  function nudgeEdit(frames) { setEditPos(state.editPos + frames * FRAME); }
+  function renderEditRange() {
+    const len = Math.max(0, state.editOut - state.editIn);
+    $('edit-range-cap').textContent =
+      `Keeping ${state.editIn.toFixed(2)}s → ${state.editOut.toFixed(2)}s  (${len.toFixed(2)}s long). Scrub + ◀▶ to a frame, then “Set start” / “Set end”.`;
+  }
+  function loadEditVideo(file) {
+    if (state.editPrev) state.editPrev.destroy();
+    state.editFile = file;
+    state.editPrev = createPreviewer(file);
+    editLast = null;
+    $('drop-edit').classList.add('loaded');
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.preload = 'metadata'; v.src = url;
+    v.onloadedmetadata = () => {
+      state.editDur = v.duration;
+      state.editIn = 0; state.editOut = v.duration;
+      const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+      $('info-edit').innerHTML = `<div class="filename">${file.name}</div><div class="meta">${v.duration.toFixed(1)}s · ${sizeMB} MB</div>`;
+      URL.revokeObjectURL(url);
+      $('edit-controls').style.display = '';
+      setEditPos(0);
+      renderEditRange();
+      checkReady();
+    };
+  }
+  function clearEditVideo() {
+    if (state.editPrev) { state.editPrev.destroy(); state.editPrev = null; }
+    state.editFile = null; state.editDur = 0; state.editIn = 0; state.editOut = 0; state.editPos = 0;
+    editLast = null;
+    $('file-edit').value = '';
+    $('drop-edit').classList.remove('loaded');
+    $('info-edit').textContent = 'Click to choose or drag a video here';
+    $('edit-controls').style.display = 'none';
+    checkReady();
+  }
+  (function setupEdit() {
+    const drop = $('drop-edit'), input = $('file-edit');
+    drop.addEventListener('click', e => { if (e.target.id === 'remove-edit') return; input.click(); });
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) loadEditVideo(e.dataTransfer.files[0]); });
+    input.addEventListener('change', e => { if (e.target.files[0]) loadEditVideo(e.target.files[0]); });
+    $('remove-edit').addEventListener('click', e => { e.stopPropagation(); clearEditVideo(); });
+    $('edit-scrub').addEventListener('input', () => {
+      if (!state.editDur) return;
+      setEditPos(parseInt($('edit-scrub').value, 10) / EDIT_RANGE * state.editDur);
+    });
+    attachHold($('edit-back'), mult => nudgeEdit(-mult));
+    attachHold($('edit-fwd'), mult => nudgeEdit(mult));
+    $('edit-set-start').addEventListener('click', () => {
+      state.editIn = state.editPos;
+      if (state.editOut <= state.editIn) state.editOut = Math.min(state.editDur, state.editIn + 0.1);
+      renderEditRange(); checkReady();
+    });
+    $('edit-set-end').addEventListener('click', () => {
+      state.editOut = state.editPos;
+      if (state.editIn >= state.editOut) state.editIn = Math.max(0, state.editOut - 0.1);
+      renderEditRange(); checkReady();
+    });
+  })();
+
+  // ---------- shared output finalize ----------
+  function finishOutput(filename) {
+    collapseToDone();
+    setProgress('');
+    document.querySelector('.layout').classList.add('done');
+    const data = ffmpeg.FS('readFile', 'out.mp4');
+    const blob = new Blob([data.buffer], { type: 'video/mp4' });
+    const url = URL.createObjectURL(blob);
+    $('preview').src = url;
+    $('dl').href = url;
+    $('dl').download = filename || 'output.mp4';
+    $('result').style.display = 'block';
+    updateSidePlaceholder();
+  }
+
+  async function runSimpleSplice() {
+    defineSteps([
+      { label: 'Reading first video', weight: 0.5 },
+      { label: 'Reading second video', weight: 0.5 },
+      { label: 'Normalizing first video', weight: (state.duration1 || 1) * 0.45 },
+      { label: 'Normalizing second video', weight: (state.duration2 || 1) * 0.45 },
+      { label: 'Splicing', weight: 1 },
+    ]);
+    setProgress('Processing…');
+    const probe = await getVideoProps(state.file1);
+    const W = probe.width, H = probe.height, FPS = 30;
+    const baseFilter = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`;
+    const enc = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
+    nextStep(); ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
+    nextStep(); ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
+    nextStep(); await ffmpeg.run('-i', 'in1.mp4', '-vf', baseFilter, '-an', ...enc, 'p1.mp4');
+    nextStep(); await ffmpeg.run('-i', 'in2.mp4', '-vf', baseFilter, '-an', ...enc, 'p2.mp4');
+    nextStep();
+    ffmpeg.FS('writeFile', 'list.txt', new TextEncoder().encode("file 'p1.mp4'\nfile 'p2.mp4'"));
+    await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'out.mp4');
+    finishOutput('timelapse-spliced.mp4');
+    ['in1.mp4', 'in2.mp4', 'p1.mp4', 'p2.mp4', 'list.txt', 'out.mp4'].forEach(f => { try { ffmpeg.FS('unlink', f); } catch {} });
+  }
+
+  async function runImages() {
+    const imgs = state.images;
+    const targetLen = Math.max(0.5, parseFloat($('img-length').value) || 10);
+    const dedupe = $('img-dedupe').checked;
+    defineSteps([
+      { label: 'Reading images', weight: imgs.length * 0.02 + 0.5 },
+      dedupe && { label: 'Removing duplicate frames', weight: imgs.length * 0.01 + 0.2 },
+      { label: 'Encoding timelapse', weight: Math.max(1, targetLen * 0.45) },
+    ]);
+    setProgress('Processing…');
+    const dims = await imageDims(imgs[0]);
+    let W = Math.max(2, dims.w - (dims.w % 2)), H = Math.max(2, dims.h - (dims.h % 2));
+    const ext = ((imgs[0].name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '')) || 'png';
+
+    nextStep(); // reading
+    const buffers = [];
+    for (const f of imgs) buffers.push(new Uint8Array(await f.arrayBuffer()));
+
+    let kept = buffers;
+    if (dedupe) {
+      nextStep(); // removing dupes
+      kept = [];
+      let prev = null;
+      for (const b of buffers) { if (prev && sameBytes(prev, b)) continue; kept.push(b); prev = b; }
+    }
+    if (kept.length < 1) throw new Error('No frames left after de-duplication.');
+
+    const pad = n => String(n).padStart(5, '0');
+    for (let i = 0; i < kept.length; i++) ffmpeg.FS('writeFile', `f${pad(i + 1)}.${ext}`, kept[i]);
+
+    const inFps = kept.length / targetLen;
+    nextStep(); // encoding
+    await ffmpeg.run(
+      '-framerate', inFps.toFixed(6),
+      '-start_number', '1',
+      '-i', `f%05d.${ext}`,
+      '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=30,setsar=1`,
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      'out.mp4'
+    );
+    finishOutput('timelapse-from-images.mp4');
+    setProgress(`Done — ${kept.length} frames${dedupe ? ` (removed ${buffers.length - kept.length} duplicates)` : ''}.`);
+    for (let i = 0; i < kept.length; i++) { try { ffmpeg.FS('unlink', `f${pad(i + 1)}.${ext}`); } catch {} }
+    try { ffmpeg.FS('unlink', 'out.mp4'); } catch {}
+  }
+
+  async function runTrim() {
+    const inT = state.editIn, outT = state.editOut;
+    const len = Math.max(0.05, outT - inT);
+    defineSteps([
+      { label: 'Reading video', weight: 0.5 },
+      { label: 'Cutting clip', weight: Math.max(1, len * 0.5) },
+    ]);
+    setProgress('Processing…');
+    nextStep();
+    ffmpeg.FS('writeFile', 'edit_in.mp4', await fetchFile(state.editFile));
+    nextStep();
+    await ffmpeg.run(
+      '-i', 'edit_in.mp4',
+      '-ss', inT.toFixed(3),
+      '-to', outT.toFixed(3),
+      '-an',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      'out.mp4'
+    );
+    finishOutput('trimmed.mp4');
+    ['edit_in.mp4', 'out.mp4'].forEach(f => { try { ffmpeg.FS('unlink', f); } catch {} });
+  }
+
+  $('skip-finish').addEventListener('change', () => { updateModeUI(); checkReady(); });
+
+  const SUBTEXT = {
+    splice: "Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join.",
+    add: 'Add a clean flash and a final hold to a timelapse that does not already have a built-in flash.',
+    images: 'Turn a folder of image frames into a timelapse video. Set the length and optionally drop exact-duplicate frames.',
+    trim: 'Cut a single video down to just the part you want — scrub to find the exact in and out frames.',
+  };
+
   function updateModeUI() {
-    const splice = state.tab === 'splice';
+    const tab = state.tab;
+    const splice = tab === 'splice';
+    // card-level visibility by data-tabs
+    document.querySelectorAll('[data-tabs]').forEach(el => {
+      el.style.display = el.dataset.tabs.split(' ').includes(tab) ? '' : 'none';
+    });
+    // splice-only rows live inside shared cards
     document.querySelectorAll('.splice-only').forEach(el => {
       el.style.display = splice ? '' : 'none';
     });
+    // skip-finish hides the finish settings
+    $('finish-body').style.display = (splice && $('skip-finish').checked) ? 'none' : '';
+    // trim controls only appear once a video is loaded
+    if (!state.editFile) $('edit-controls').style.display = 'none';
+
     $('finish-step').textContent = splice ? '3' : '2';
-    $('sub-text').textContent = splice
-      ? "Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join."
-      : 'Add a clean flash and a final hold to a timelapse that does not already have a built-in flash.';
+    $('sub-text').textContent = SUBTEXT[tab] || SUBTEXT.splice;
     $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
     $('trim-start-target').textContent = splice ? 'first video' : 'video';
     syncStepperLabels();
@@ -1082,8 +1435,8 @@
 
   // Persist user preferences (not video-specific values like length1/length2)
   const STORAGE_KEY = 'timesplicer-settings-v1';
-  const PERSIST_TEXT = ['trim-start', 'trim', 'intro', 'hold', 'deflicker-sens', 'deflicker1-sens'];
-  const PERSIST_CHECK = ['flash', 'deflicker', 'deflicker1'];
+  const PERSIST_TEXT = ['trim-start', 'trim', 'intro', 'hold', 'deflicker-sens', 'deflicker1-sens', 'img-length'];
+  const PERSIST_CHECK = ['flash', 'deflicker', 'deflicker1', 'skip-finish', 'img-dedupe'];
 
   function saveSettings() {
     const data = { tab: state.tab };
@@ -1103,7 +1456,7 @@
       PERSIST_CHECK.forEach(k => {
         if (typeof data[k] === 'boolean') $(k).checked = data[k];
       });
-      if (data.tab === 'add' || data.tab === 'splice') {
+      if (['splice', 'add', 'images', 'trim'].includes(data.tab)) {
         state.tab = data.tab;
         document.querySelectorAll('.tab').forEach(t => {
           t.classList.toggle('active', t.dataset.tab === data.tab);
@@ -1132,19 +1485,23 @@
     if (state.tab === 'splice') {
       if (state.file1 && state.file2) {
         go.disabled = false;
-        go.textContent = 'Splice videos';
+        go.textContent = $('skip-finish').checked ? 'Splice videos (as-is)' : 'Splice videos';
       } else {
         go.disabled = true;
         go.textContent = state.file1 ? 'Choose second video' : 'Choose two videos';
       }
-    } else {
-      if (state.file1) {
-        go.disabled = false;
-        go.textContent = 'Add flash & hold';
-      } else {
-        go.disabled = true;
-        go.textContent = 'Choose a video';
-      }
+    } else if (state.tab === 'add') {
+      go.disabled = !state.file1;
+      go.textContent = state.file1 ? 'Add flash & hold' : 'Choose a video';
+    } else if (state.tab === 'images') {
+      const n = state.images.length;
+      go.disabled = n < 2;
+      go.textContent = n >= 2 ? `Make timelapse from ${n} images` : 'Choose at least 2 images';
+    } else if (state.tab === 'trim') {
+      const ready = state.editFile && state.editOut > state.editIn;
+      go.disabled = !ready;
+      go.textContent = !state.editFile ? 'Choose a video'
+        : (state.editOut > state.editIn ? 'Export trimmed clip' : 'Set a start and end');
     }
   }
 
@@ -1407,6 +1764,22 @@
     document.querySelector('.layout').classList.remove('done');
     $('go').disabled = true;
 
+    // dispatch to the standalone tools / skip-finish path
+    if (state.tab === 'images' || state.tab === 'trim' || (state.tab === 'splice' && $('skip-finish').checked)) {
+      try {
+        if (state.tab === 'images') await runImages();
+        else if (state.tab === 'trim') await runTrim();
+        else await runSimpleSplice();
+      } catch (e) {
+        $('error').textContent = 'Error: ' + (e.message || e);
+        setProgress('');
+        updateSidePlaceholder();
+      } finally {
+        $('go').disabled = false;
+      }
+      return;
+    }
+
     const hold = parseFloat($('hold').value) || 0;
     const addFlash = $('flash').checked;
     const splice = state.tab === 'splice';
@@ -1653,6 +2026,7 @@
       const url = URL.createObjectURL(blob);
       $('preview').src = url;
       $('dl').href = url;
+      $('dl').download = 'timelapse-spliced.mp4';
       $('result').style.display = 'block';
       updateSidePlaceholder();
 
