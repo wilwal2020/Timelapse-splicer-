@@ -863,21 +863,13 @@
     [state.file1, state.file2] = [state.file2, state.file1];
     [state.duration1, state.duration2] = [state.duration2, state.duration1];
     [state.prev1, state.prev2] = [state.prev2, state.prev1];
-    const swapVal = (a, b) => { const t = $(a).value; $(a).value = $(b).value; $(b).value = t; };
-    const swapChk = (a, b) => { const t = $(a).checked; $(a).checked = $(b).checked; $(b).checked = t; };
-    swapVal('length1', 'length2');
-    swapChk('deflicker1', 'deflicker');       // v1 uses id "deflicker1", v2 uses "deflicker"
-    swapVal('deflicker1-sens', 'deflicker-sens');
+    // only the video files move — deflicker and length settings stay with their slot
     // refresh the file input elements so re-selecting the same file still fires change
     $('file1').value = '';
     $('file2').value = '';
     // re-render both slots + dependent UI
     renderVideoSlot(1);
     renderVideoSlot(2);
-    $('deflicker-sens-row').style.display = $('deflicker').checked ? '' : 'none';
-    $('deflicker1-sens-row').style.display = $('deflicker1').checked ? '' : 'none';
-    $('deflicker-sens-val').textContent = $('deflicker-sens').value;
-    $('deflicker1-sens-val').textContent = $('deflicker1-sens').value;
     resetCutPreviews();
     updateModeUI();
     checkReady();
