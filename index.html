@@ -497,6 +497,20 @@
   }
   .mark-btn:hover { border-color: var(--accent); }
   .mark-btn:active { background: var(--accent); color: #fff; }
+  .swap-row { display: flex; justify-content: center; margin: -6px 0 16px; }
+  .swap-btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .swap-btn:hover { color: var(--text); border-color: var(--accent); }
+  .swap-btn:active { background: var(--surface-2); }
   .finish-h2 { display: flex; align-items: center; }
   .skip-toggle {
     margin-left: auto;
@@ -544,6 +558,10 @@
       <input type="range" id="deflicker1-sens" min="0" max="200" value="50">
       <span class="unit" id="deflicker1-sens-val">50</span>
     </div>
+  </div>
+
+  <div class="swap-row splice-only">
+    <button class="swap-btn" id="swap-videos" type="button" title="Swap video 1 and video 2">⇅ Swap videos</button>
   </div>
 
   <div class="card splice-only" id="card-second-video">
@@ -825,6 +843,47 @@
       removeFile(btn.dataset.target);
     });
   });
+
+  function renderVideoSlot(n) {
+    const file = state['file' + n];
+    const drop = $('drop' + n), info = $('info' + n);
+    if (file) {
+      drop.classList.add('loaded');
+      const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+      info.innerHTML = `<div class="filename">${file.name}</div><div class="meta">${(state['duration' + n] || 0).toFixed(1)}s · ${sizeMB} MB</div>`;
+    } else {
+      drop.classList.remove('loaded');
+      info.textContent = DEFAULT_INFO['file' + n];
+    }
+  }
+
+  function swapVideos() {
+    if (!state.file1 && !state.file2) return;
+    // core state: the video and its intrinsic settings move together
+    [state.file1, state.file2] = [state.file2, state.file1];
+    [state.duration1, state.duration2] = [state.duration2, state.duration1];
+    [state.prev1, state.prev2] = [state.prev2, state.prev1];
+    const swapVal = (a, b) => { const t = $(a).value; $(a).value = $(b).value; $(b).value = t; };
+    const swapChk = (a, b) => { const t = $(a).checked; $(a).checked = $(b).checked; $(b).checked = t; };
+    swapVal('length1', 'length2');
+    swapChk('deflicker1', 'deflicker');       // v1 uses id "deflicker1", v2 uses "deflicker"
+    swapVal('deflicker1-sens', 'deflicker-sens');
+    // refresh the file input elements so re-selecting the same file still fires change
+    $('file1').value = '';
+    $('file2').value = '';
+    // re-render both slots + dependent UI
+    renderVideoSlot(1);
+    renderVideoSlot(2);
+    $('deflicker-sens-row').style.display = $('deflicker').checked ? '' : 'none';
+    $('deflicker1-sens-row').style.display = $('deflicker1').checked ? '' : 'none';
+    $('deflicker-sens-val').textContent = $('deflicker-sens').value;
+    $('deflicker1-sens-val').textContent = $('deflicker1-sens').value;
+    resetCutPreviews();
+    updateModeUI();
+    checkReady();
+    saveSettings();
+  }
+  $('swap-videos').addEventListener('click', swapVideos);
 
   function setTab(tab) {
     state.tab = tab;
