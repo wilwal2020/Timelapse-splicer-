@@ -694,6 +694,10 @@
       <label for="flash">Add a CSP-style flash before the final hold</label>
     </div>
     </div><!-- /finish-body -->
+    <div class="checkbox-row" id="fast-splice-row" style="display:none">
+      <input type="checkbox" id="fast-splice">
+      <label for="fast-splice">Fast copy — no re-encode (needs matching resolution &amp; fps; untick if the join glitches)</label>
+    </div>
   </div>
 
   <!-- Images → video -->
@@ -748,6 +752,10 @@
       <button class="mark-btn" type="button" id="edit-set-end">Set end here</button>
     </div>
     <div class="cut-preview-cap" id="edit-range-cap" style="margin-top:10px"></div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="fast-trim">
+      <label for="fast-trim">Fast trim — no re-encode (the start snaps back to the nearest keyframe)</label>
+    </div>
   </div>
 
   <button class="primary" id="go" disabled>Loading FFmpeg…</button>
@@ -779,6 +787,10 @@
 <script>
   const FFMPEG_SRC = 'vendor/ffmpeg.min.js';
   const CORE_PATH  = new URL('vendor/ffmpeg-core.js', location.href).href;
+  // Shared encoder args. -threads is capped: too many pthreads can exhaust
+  // wasm memory, and beyond ~8 x264 gains little at these resolutions.
+  const THREADS = String(Math.min(8, Math.max(1, navigator.hardwareConcurrency || 4)));
+  const ENC = ['-threads', THREADS, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
 
   function loadScript(src) {
     return new Promise((resolve, reject) => {
@@ -1265,25 +1277,33 @@
   }
 
   async function runSimpleSplice() {
+    const fastCopy = $('fast-splice').checked;
     defineSteps([
       { label: 'Reading first video', weight: 0.5 },
       { label: 'Reading second video', weight: 0.5 },
-      { label: 'Normalizing first video', weight: (state.duration1 || 1) * 0.45 },
-      { label: 'Normalizing second video', weight: (state.duration2 || 1) * 0.45 },
+      !fastCopy && { label: 'Normalizing first video', weight: (state.duration1 || 1) * 0.45 },
+      !fastCopy && { label: 'Normalizing second video', weight: (state.duration2 || 1) * 0.45 },
       { label: 'Splicing', weight: 1 },
     ]);
     setProgress('Processing…');
-    const probe = await getVideoProps(state.file1);
-    const W = probe.width, H = probe.height, FPS = 30;
-    const baseFilter = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`;
-    const enc = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
     nextStep(); ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
     nextStep(); ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
-    nextStep(); await ffmpeg.run('-i', 'in1.mp4', '-vf', baseFilter, '-an', ...enc, 'p1.mp4');
-    nextStep(); await ffmpeg.run('-i', 'in2.mp4', '-vf', baseFilter, '-an', ...enc, 'p2.mp4');
+    let parts;
+    if (fastCopy) {
+      // join the original streams as-is; only works when both videos share
+      // codec/resolution/fps parameters — the checkbox warns about that
+      parts = ['in1.mp4', 'in2.mp4'];
+    } else {
+      const probe = await getVideoProps(state.file1);
+      const W = probe.width, H = probe.height, FPS = 30;
+      const baseFilter = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`;
+      nextStep(); await ffmpeg.run('-i', 'in1.mp4', '-vf', baseFilter, '-an', ...ENC, 'p1.mp4');
+      nextStep(); await ffmpeg.run('-i', 'in2.mp4', '-vf', baseFilter, '-an', ...ENC, 'p2.mp4');
+      parts = ['p1.mp4', 'p2.mp4'];
+    }
     nextStep();
-    ffmpeg.FS('writeFile', 'list.txt', new TextEncoder().encode("file 'p1.mp4'\nfile 'p2.mp4'"));
-    await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'out.mp4');
+    ffmpeg.FS('writeFile', 'list.txt', new TextEncoder().encode(parts.map(p => `file '${p}'`).join('\n')));
+    await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', '-an', 'out.mp4');
     finishOutput('timelapse-spliced.mp4');
     ['in1.mp4', 'in2.mp4', 'p1.mp4', 'p2.mp4', 'list.txt', 'out.mp4'].forEach(f => { try { ffmpeg.FS('unlink', f); } catch {} });
   }
@@ -1325,7 +1345,7 @@
       '-start_number', '1',
       '-i', `f%05d.${ext}`,
       '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=30,setsar=1`,
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+      ...ENC,
       'out.mp4'
     );
     finishOutput('timelapse-from-images.mp4');
@@ -1337,22 +1357,35 @@
   async function runTrim() {
     const inT = state.editIn, outT = state.editOut;
     const len = Math.max(0.05, outT - inT);
+    const fast = $('fast-trim').checked;
     defineSteps([
       { label: 'Reading video', weight: 0.5 },
-      { label: 'Cutting clip', weight: Math.max(1, len * 0.5) },
+      { label: 'Cutting clip', weight: fast ? 0.3 : Math.max(1, len * 0.5) },
     ]);
     setProgress('Processing…');
     nextStep();
     ffmpeg.FS('writeFile', 'edit_in.mp4', await fetchFile(state.editFile));
     nextStep();
-    await ffmpeg.run(
-      '-i', 'edit_in.mp4',
-      '-ss', inT.toFixed(3),
-      '-to', outT.toFixed(3),
-      '-an',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-      'out.mp4'
-    );
+    if (fast) {
+      // stream copy: near-instant, but the start snaps to the keyframe at
+      // or before the chosen frame
+      await ffmpeg.run(
+        '-ss', inT.toFixed(3),
+        '-i', 'edit_in.mp4',
+        '-t', len.toFixed(3),
+        '-c', 'copy', '-an',
+        'out.mp4'
+      );
+    } else {
+      await ffmpeg.run(
+        '-i', 'edit_in.mp4',
+        '-ss', inT.toFixed(3),
+        '-to', outT.toFixed(3),
+        '-an',
+        ...ENC,
+        'out.mp4'
+      );
+    }
     finishOutput('trimmed.mp4');
     ['edit_in.mp4', 'out.mp4'].forEach(f => { try { ffmpeg.FS('unlink', f); } catch {} });
   }
@@ -1377,8 +1410,9 @@
     document.querySelectorAll('.splice-only').forEach(el => {
       el.style.display = splice ? '' : 'none';
     });
-    // skip-finish hides the finish settings
+    // skip-finish hides the finish settings and offers the no-re-encode path
     $('finish-body').style.display = (splice && $('skip-finish').checked) ? 'none' : '';
+    $('fast-splice-row').style.display = (splice && $('skip-finish').checked) ? '' : 'none';
     // trim controls only appear once a video is loaded
     if (!state.editFile) $('edit-controls').style.display = 'none';
 
@@ -1496,7 +1530,7 @@
   // Persist user preferences (not video-specific values like length1/length2)
   const STORAGE_KEY = 'timesplicer-settings-v1';
   const PERSIST_TEXT = ['trim-start', 'trim', 'intro', 'hold', 'deflicker-sens', 'deflicker1-sens', 'img-length'];
-  const PERSIST_CHECK = ['flash', 'deflicker', 'deflicker1', 'skip-finish', 'img-dedupe'];
+  const PERSIST_CHECK = ['flash', 'deflicker', 'deflicker1', 'skip-finish', 'img-dedupe', 'fast-splice', 'fast-trim'];
 
   function saveSettings() {
     const data = { tab: state.tab };
@@ -1622,23 +1656,6 @@
       renderSteps();
     }
   }
-  function markCurrentStepDone(finalLabel) {
-    if (currentStepIdx >= 0 && currentStepIdx < steps.length) {
-      if (finalLabel) steps[currentStepIdx].label = finalLabel;
-      // already counted in nextStep; nothing else to add to completedWeight
-      steps[currentStepIdx].status = 'done';
-      steps[currentStepIdx].pct = 100;
-      renderSteps();
-      updateOverall();
-    }
-  }
-  function insertStepAfterCurrent(label, weight) {
-    const step = normalizeStep({ label, weight: weight || 1 });
-    steps.splice(currentStepIdx + 1, 0, step);
-    totalWeight += step.weight;
-    renderSteps();
-    updateOverall();
-  }
   function setStepPct(pct) {
     if (currentStepIdx >= 0 && currentStepIdx < steps.length && steps[currentStepIdx].status === 'active') {
       steps[currentStepIdx].pct = Math.max(0, Math.min(100, pct));
@@ -1727,8 +1744,12 @@
     }
   })();
 
-  async function runDeflicker(inputName, outputName, sensitivity, hooks) {
-    hooks = hooks || {};
+  // Decode to 32×32 grayscale thumbs and locate flicker frames. Analysis
+  // only — the caller folds the returned select expression into its main
+  // encode, so removal costs no extra encode pass. inputArgs is the ffmpeg
+  // input spec (e.g. ['-ss','1.5','-i','in2.mp4']); the encode must use the
+  // same spec so the frame numbers line up.
+  async function analyzeFlicker(inputArgs, sensitivity) {
     // sensitivity uses the same formula 0..100; above 100 keeps going lower:
     //  T (absolute floor): 30..0.5 at 100, → 0 by ~102
     //  R (ratio):           4..1.1 at 100, → 0.7 by ~114, floored there
@@ -1736,7 +1757,7 @@
     const R = Math.max(0.7, 4 - sensitivity * 0.029);
 
     await ffmpeg.run(
-      '-i', inputName,
+      ...inputArgs,
       '-vf', 'scale=32:32:flags=fast_bilinear,format=gray',
       '-c:v', 'rawvideo', '-f', 'rawvideo',
       'dfl_thumbs.raw'
@@ -1796,26 +1817,13 @@
     try { ffmpeg.FS('unlink', 'dfl_thumbs.raw'); } catch {}
 
     const flickerList = Array.from(flickerSet).sort((a, b) => a - b);
+    return { flickerList, frameCount: n, aborted: flickerList.length > n * 0.9 };
+  }
 
-    if (flickerList.length === 0) {
-      hooks.skipped && hooks.skipped('No flicker detected — skipped');
-      return { count: 0, outputName: inputName };
-    }
-    if (flickerList.length > n * 0.9) {
-      hooks.skipped && hooks.skipped('Too many candidates — aborted (lower sensitivity)');
-      return { count: 0, outputName: inputName, aborted: true };
-    }
-
-    hooks.beginRemove && hooks.beginRemove(flickerList.length);
-    const selectExpr = `not(${flickerList.map(i => `eq(n\\,${i})`).join('+')})`;
-    await ffmpeg.run(
-      '-i', inputName,
-      '-vf', `select='${selectExpr}',setpts=N/FRAME_RATE/TB`,
-      '-an',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-      outputName
-    );
-    return { count: flickerList.length, outputName };
+  // Filtergraph prefix that drops the flagged frames and re-stamps timestamps.
+  function flickerSelectPrefix(flickerList) {
+    const expr = `not(${flickerList.map(i => `eq(n\\,${i})`).join('+')})`;
+    return `select='${expr}',setpts=N/FRAME_RATE/TB,`;
   }
 
   $('go').addEventListener('click', async () => {
@@ -1861,17 +1869,16 @@
 
     // Weights are calibrated as predicted seconds of work, fit from a
     // measured 39s run (d1=30, d2=60, deflicker on, hold=4, flash on).
+    // Flicker removal is folded into the trim/normalize encodes, so those
+    // steps absorb its extra decode cost when deflicker is on.
     defineSteps([
       { label: 'Reading first video', weight: 0.5 },
       hasSecond && { label: 'Reading second video', weight: 0.5 },
       wantDeflicker1 && { label: splice ? 'Analyzing first video for flicker' : 'Analyzing video for flicker', weight: d1 * 0.04 },
-      // "Removing N flicker frames" for v1 inserted dynamically if flickers are found
-      (wantDeflicker && hasIntro) && { label: 'Splitting second video', weight: v2Rest * 0.45 },
       wantDeflicker && { label: 'Analyzing second video for flicker', weight: d2 * 0.04 },
-      // "Removing N flicker frames" for v2 inserted dynamically if flickers are found
       hasIntro && { label: 'Building intro from second video', weight: introUserVal * 0.45 },
-      { label: splice ? 'Trimming first video' : 'Trimming video', weight: v1Body * 0.033 },
-      hasSecond && { label: 'Normalizing second video', weight: v2Rest * 0.45 },
+      { label: splice ? 'Trimming first video' : 'Trimming video', weight: v1Body * 0.033 + (wantDeflicker1 ? d1 * 0.06 : 0) },
+      hasSecond && { label: 'Normalizing second video', weight: v2Rest * 0.45 + (wantDeflicker ? d2 * 0.06 : 0) },
       (addFlash || hold > 0) && { label: 'Capturing final frame', weight: 0.5 },
       addFlash && { label: 'Building flash', weight: 1 },
       (hold > 0) && { label: 'Building final hold', weight: Math.max(0.5, hold * 0.4) },
@@ -1885,7 +1892,6 @@
       const W = probe.width, H = probe.height;
       const FPS = 30; // normalize for consistent splicing
       const baseFilter = `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`;
-      const baseEncode = ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'];
 
       nextStep(); // Reading first video
       ffmpeg.FS('writeFile', 'in1.mp4', await fetchFile(state.file1));
@@ -1894,84 +1900,59 @@
         ffmpeg.FS('writeFile', 'in2.mp4', await fetchFile(state.file2));
       }
 
-      // optional: deflicker v1
-      let v1Src = 'in1.mp4';
+      // optional: deflicker v1 — analysis only; the flagged frames are
+      // dropped inside the main encode below, so v1 is encoded just once
+      let v1Select = '';
       let effDur1 = state.duration1;
       if (wantDeflicker1) {
         nextStep(); // Analyzing first video for flicker
         const sens = parseInt($('deflicker1-sens').value, 10);
-        const v1Label = splice ? 'from first video' : '';
-        const dfl = await runDeflicker('in1.mp4', 'in1_dfl.mp4', sens, {
-          skipped: (reason) => {
-            insertStepAfterCurrent(reason, 0.01);
-            nextStep();
-            markCurrentStepDone();
-          },
-          beginRemove: (count) => {
-            insertStepAfterCurrent(
-              `Removing ${count} flicker frames${v1Label ? ' ' + v1Label : ''}`,
-              d1 * 0.06
-            );
-            nextStep();
-          },
-        });
-        if (dfl.aborted) {
+        const a = await analyzeFlicker(['-i', 'in1.mp4'], sens);
+        if (a.aborted) {
           $('error').textContent = 'Deflicker (first video) aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
           setProgress('');
           return;
         }
-        if (dfl.count > 0) {
-          v1Src = 'in1_dfl.mp4';
-          const blob = new Blob([ffmpeg.FS('readFile', v1Src).buffer], { type: 'video/mp4' });
-          const tmpFile = new File([blob], v1Src);
-          const dflProps = await getVideoProps(tmpFile);
-          effDur1 = dflProps.duration;
+        const where = splice ? ' (first video)' : '';
+        if (a.flickerList.length > 0) {
+          v1Select = flickerSelectPrefix(a.flickerList);
+          effDur1 = state.duration1 * (a.frameCount - a.flickerList.length) / a.frameCount;
+          setCurrentStepLabel(`Flicker scan${where}: dropping ${a.flickerList.length} frames`);
+        } else {
+          setCurrentStepLabel(`Flicker scan${where}: none found`);
         }
       }
 
-      // ---- video 2: split the intro off the ORIGINAL timeline first (so it
-      // stays aligned with the preview), then deflicker only the rest. If we
-      // deflickered the whole clip first, the removed frames would shift time
-      // and the intro would pull in far more of the video than intended. ----
+      // ---- video 2: the intro is cut off the ORIGINAL timeline (so it stays
+      // aligned with the preview); flicker analysis runs only on the rest,
+      // and the flagged frames are dropped inside the normalize encode below.
+      // Both the analysis and the encode read in2.mp4 through the same -ss
+      // input seek, so the select frame numbers line up. ----
       const introRaw = hasSecond
         ? Math.max(0, Math.min(parseFloat($('intro').value) || 0, state.duration2 - 0.1))
         : 0;
-      let restSrc = 'in2.mp4';   // the main timelapse (everything after the intro)
-      let restSeek = 0;          // -ss applied to restSrc when it isn't pre-split
-      let restDur = state.duration2;
+      const restInput = introRaw > 0
+        ? ['-ss', introRaw.toFixed(3), '-i', 'in2.mp4']
+        : ['-i', 'in2.mp4'];
+      let v2Select = '';
       let effDur2 = state.duration2;
 
-      if (hasSecond) {
-        if (wantDeflicker) {
-          if (introRaw > 0) {
-            nextStep(); // Splitting second video
-            await ffmpeg.run(
-              '-ss', introRaw.toFixed(3), '-i', 'in2.mp4', '-an',
-              '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
-              'in2_rest.mp4'
-            );
-            restSrc = 'in2_rest.mp4';
-          }
-          nextStep(); // Analyzing second video for flicker
-          const sens = parseInt($('deflicker-sens').value, 10);
-          const dfl = await runDeflicker(restSrc, 'in2_rest_dfl.mp4', sens, {
-            skipped: (reason) => { insertStepAfterCurrent(reason, 0.01); nextStep(); markCurrentStepDone(); },
-            beginRemove: (count) => { insertStepAfterCurrent(`Removing ${count} flicker frames from second video`, d2 * 0.06); nextStep(); },
-          });
-          if (dfl.aborted) {
-            $('error').textContent = 'Deflicker (second video) aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
-            setProgress('');
-            return;
-          }
-          if (dfl.count > 0) restSrc = 'in2_rest_dfl.mp4';
-          restDur = (await getVideoProps(fsToFile(restSrc))).duration;
-          restSeek = 0;
-          effDur2 = introRaw + restDur;
+      if (hasSecond && wantDeflicker) {
+        nextStep(); // Analyzing second video for flicker
+        const sens = parseInt($('deflicker-sens').value, 10);
+        const a = await analyzeFlicker(restInput, sens);
+        if (a.aborted) {
+          $('error').textContent = 'Deflicker (second video) aborted: sensitivity too high (would drop > 60% of frames). Lower the slider and retry.';
+          setProgress('');
+          return;
+        }
+        if (a.flickerList.length > 0) {
+          v2Select = flickerSelectPrefix(a.flickerList);
+          const restOrig = Math.max(0.1, state.duration2 - introRaw);
+          effDur2 = introRaw + restOrig * (a.frameCount - a.flickerList.length) / a.frameCount;
+          setCurrentStepLabel(`Flicker scan (second video): dropping ${a.flickerList.length} frames`);
         } else {
-          restSrc = 'in2.mp4';
-          restSeek = introRaw;
-          restDur = Math.max(0.1, state.duration2 - introRaw);
-          effDur2 = state.duration2;
+          setCurrentStepLabel('Flicker scan (second video): none found');
         }
       }
 
@@ -1991,44 +1972,58 @@
           '-i', 'in2.mp4',
           '-vf', `${setpts2}${baseFilter}`,
           '-an',
-          ...baseEncode,
+          ...ENC,
           'intro.mp4'
         );
         parts.push('intro.mp4');
       }
 
-      // 2) first video: skip trimStart1, take trimmedDur1, normalize, speed
+      // 2) first video: drop flicker frames (if any), skip trimStart1, take
+      // trimmedDur1, normalize, speed — all in one decode+encode
       nextStep(); // Trimming first video
-      await ffmpeg.run(
-        '-ss', trimStart1.toFixed(3),
-        '-t', trimmedDur1.toFixed(3),
-        '-i', v1Src,
-        '-vf', `${setpts1}${baseFilter}`,
-        '-an',
-        ...baseEncode,
-        'p1.mp4'
-      );
+      if (v1Select) {
+        // the cut times must land on the deflickered timeline, so trim in
+        // the filtergraph after select instead of with -ss/-t input options
+        await ffmpeg.run(
+          '-i', 'in1.mp4',
+          '-vf', `${v1Select}trim=start=${trimStart1.toFixed(3)}:duration=${trimmedDur1.toFixed(3)},setpts=PTS-STARTPTS,${setpts1}${baseFilter}`,
+          '-an',
+          ...ENC,
+          'p1.mp4'
+        );
+      } else {
+        await ffmpeg.run(
+          '-ss', trimStart1.toFixed(3),
+          '-t', trimmedDur1.toFixed(3),
+          '-i', 'in1.mp4',
+          '-vf', `${setpts1}${baseFilter}`,
+          '-an',
+          ...ENC,
+          'p1.mp4'
+        );
+      }
       parts.push('p1.mp4');
 
-      // 3) second video: the rest (main timelapse), normalize, speed
+      // 3) second video: everything after the intro, flicker frames dropped,
+      // normalized and speed-adjusted in a single encode
       if (hasSecond) {
         nextStep(); // Normalizing second video
-        const restArgs = [];
-        if (restSeek > 0) restArgs.push('-ss', restSeek.toFixed(3));
-        restArgs.push('-t', restDur.toFixed(3), '-i', restSrc, '-vf', `${setpts2}${baseFilter}`,
-          '-an', ...baseEncode, 'p2.mp4');
-        await ffmpeg.run(...restArgs);
+        await ffmpeg.run(
+          ...restInput,
+          '-vf', `${v2Select}${setpts2}${baseFilter}`,
+          '-an',
+          ...ENC,
+          'p2.mp4'
+        );
         parts.push('p2.mp4');
       }
 
-      // extract last frame (finished art) from the rest's end (or v1 in add mode)
+      // extract the finished art from the end of the last normalized part
       if (addFlash || hold > 0) {
         nextStep(); // Capturing final frame
-        const lastSrc = hasSecond ? restSrc : v1Src;
-        const lastSrcDur = hasSecond ? (restSeek + restDur) : (effDur1 - trimEnd1);
-        const lastFrameTime = Math.max(0, lastSrcDur - 0.05);
+        const lastSrc = hasSecond ? 'p2.mp4' : 'p1.mp4';
         await ffmpeg.run(
-          '-ss', lastFrameTime.toFixed(3),
+          '-sseof', '-0.1',
           '-i', lastSrc,
           '-frames:v', '1',
           'last.png'
@@ -2047,7 +2042,7 @@
             `[bg][w]overlay,fps=${FPS}`,
           '-t', '0.45',
           '-an',
-          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          ...ENC,
           'flash.mp4'
         );
         parts.push('flash.mp4');
@@ -2060,7 +2055,7 @@
           '-loop', '1', '-i', 'last.png',
           '-t', hold.toFixed(3),
           '-vf', `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,fps=${FPS},setsar=1`,
-          '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+          ...ENC,
           'hold.mp4'
         );
         parts.push('hold.mp4');
@@ -2091,7 +2086,7 @@
       updateSidePlaceholder();
 
       // cleanup
-      ['in1.mp4','in2.mp4','in1_dfl.mp4','in2_rest.mp4','in2_rest_dfl.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
+      ['in1.mp4','in2.mp4','dfl_thumbs.raw','intro.mp4','p1.mp4','p2.mp4','flash.mp4','last.png','hold.mp4','list.txt','out.mp4'].forEach(f => {
         try { ffmpeg.FS('unlink', f); } catch {}
       });
     } catch (e) {
@@ -2102,11 +2097,6 @@
       $('go').disabled = false;
     }
   });
-
-  function fsToFile(name) {
-    const blob = new Blob([ffmpeg.FS('readFile', name).buffer], { type: 'video/mp4' });
-    return new File([blob], name);
-  }
 
   function getVideoProps(file) {
     return new Promise((resolve, reject) => {
