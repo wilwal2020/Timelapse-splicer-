@@ -379,7 +379,32 @@
     color: var(--text-dim);
     margin-top: 20px;
   }
+  /* Each cut control gets its own panel so the three of them don't blur together */
+  .cut-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 4px 0 22px;
+  }
+  .cut-group {
+    background: rgba(0, 0, 0, 0.14);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 12px 14px 14px;
+  }
+  .cut-group-tag {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .cut-group .row { margin-bottom: 0; }
+  .cut-group .desc { line-height: 1.45; }
   .cut-preview { display: none; margin: -2px 0 14px; }
+  .cut-group .cut-preview { margin: 10px 0 0; }
   .cut-preview.active { display: block; }
   .cut-preview-toggle {
     background: none;
@@ -532,7 +557,7 @@
 
   <div class="tabs">
     <button class="tab active" data-tab="splice" type="button">Splice two videos</button>
-    <button class="tab" data-tab="add" type="button">Add flash &amp; hold</button>
+    <button class="tab" data-tab="add" type="button">Single video</button>
     <button class="tab" data-tab="images" type="button">Images → video</button>
     <button class="tab" data-tab="trim" type="button">Trim video</button>
   </div>
@@ -588,75 +613,90 @@
   <div class="card" data-tabs="splice add">
     <h2 class="finish-h2"><span class="step" id="finish-step">3</span>Finish<label class="skip-toggle splice-only" id="skip-finish-row" title="Skip trimming, flash, hold &amp; length changes — just splice the two videos"><input type="checkbox" id="skip-finish">Skip</label></h2>
     <div id="finish-body">
-    <div class="row" id="trim-start-row">
-      <div style="flex:1">
-        <label>Cut from start of <span id="trim-start-target">first video</span></label>
-        <div class="desc">Removes the CSP preview that shows the (incomplete) art</div>
-      </div>
-      <div class="stepper">
-        <button class="step-btn" type="button" data-target="trim-start" data-dir="-1" aria-label="step back">◀</button>
-        <span class="step-val" id="val-trim-start">0.00s</span>
-        <button class="step-btn" type="button" data-target="trim-start" data-dir="1" aria-label="step forward">▶</button>
-        <input type="hidden" id="trim-start" max="60" value="0">
-      </div>
-    </div>
-    <div class="cut-preview" id="preview-trim-start">
-      <button class="cut-preview-toggle" type="button" data-pv="trim-start"></button>
-      <div class="cut-preview-body">
-        <div class="cut-frames">
-          <div class="cut-frame"><div class="fimg"><img id="img-trim-start-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
-          <div class="cut-frame is-cut"><div class="fimg"><img id="img-trim-start" alt=""></div><span class="cut-frame-label">cut point</span></div>
-          <div class="cut-frame"><div class="fimg"><img id="img-trim-start-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+    <div class="cut-groups">
+
+    <div class="cut-group" id="group-trim-start">
+      <div class="cut-group-tag" id="tag-trim-start">Video 1 · start</div>
+      <div class="row" id="trim-start-row">
+        <div style="flex:1">
+          <label>Cut from start of <span id="trim-start-target">first video</span></label>
+          <div class="desc">Everything before this point is dropped — in CSP that's the opening preview of the unfinished art. Use ◀ ▶ to nudge one frame at a time.</div>
         </div>
-        <div class="cut-preview-cap" id="cap-trim-start"></div>
-      </div>
-    </div>
-    <div class="row splice-only" id="trim-row">
-      <div style="flex:1">
-        <label>Cut from end of first video</label>
-        <div class="desc">Removes CSP's built-in final flash so it doesn't show mid-splice</div>
-      </div>
-      <div class="stepper">
-        <button class="step-btn" type="button" data-target="trim" data-dir="-1" aria-label="step back">◀</button>
-        <span class="step-val" id="val-trim">2.00s</span>
-        <button class="step-btn" type="button" data-target="trim" data-dir="1" aria-label="step forward">▶</button>
-        <input type="hidden" id="trim" max="30" value="2">
-      </div>
-    </div>
-    <div class="cut-preview splice-only" id="preview-trim">
-      <button class="cut-preview-toggle" type="button" data-pv="trim"></button>
-      <div class="cut-preview-body">
-        <div class="cut-frames">
-          <div class="cut-frame"><div class="fimg"><img id="img-trim-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
-          <div class="cut-frame is-cut"><div class="fimg"><img id="img-trim" alt=""></div><span class="cut-frame-label">cut point</span></div>
-          <div class="cut-frame"><div class="fimg"><img id="img-trim-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+        <div class="stepper">
+          <button class="step-btn" type="button" data-target="trim-start" data-dir="-1" aria-label="step back">◀</button>
+          <span class="step-val" id="val-trim-start">0.00s</span>
+          <button class="step-btn" type="button" data-target="trim-start" data-dir="1" aria-label="step forward">▶</button>
+          <input type="hidden" id="trim-start" max="60" value="0">
         </div>
-        <div class="cut-preview-cap" id="cap-trim"></div>
       </div>
-    </div>
-    <div class="row splice-only" id="intro-row">
-      <div style="flex:1">
-        <label>Move start of second video to intro</label>
-        <div class="desc" id="intro-desc">Shows the finished art briefly at the start, then plays the timelapse</div>
-      </div>
-      <div class="stepper">
-        <button class="step-btn" type="button" data-target="intro" data-dir="-1" aria-label="step back">◀</button>
-        <span class="step-val" id="val-intro">0.00s</span>
-        <button class="step-btn" type="button" data-target="intro" data-dir="1" aria-label="step forward">▶</button>
-        <input type="hidden" id="intro" max="30" value="0">
-      </div>
-    </div>
-    <div class="cut-preview splice-only" id="preview-intro">
-      <button class="cut-preview-toggle" type="button" data-pv="intro"></button>
-      <div class="cut-preview-body">
-        <div class="cut-frames">
-          <div class="cut-frame"><div class="fimg"><img id="img-intro-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
-          <div class="cut-frame is-cut"><div class="fimg"><img id="img-intro" alt=""></div><span class="cut-frame-label">resume point</span></div>
-          <div class="cut-frame"><div class="fimg"><img id="img-intro-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+      <div class="cut-preview" id="preview-trim-start">
+        <button class="cut-preview-toggle" type="button" data-pv="trim-start"></button>
+        <div class="cut-preview-body">
+          <div class="cut-frames">
+            <div class="cut-frame"><div class="fimg"><img id="img-trim-start-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
+            <div class="cut-frame is-cut"><div class="fimg"><img id="img-trim-start" alt=""></div><span class="cut-frame-label">first kept frame</span></div>
+            <div class="cut-frame"><div class="fimg"><img id="img-trim-start-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+          </div>
+          <div class="cut-preview-cap" id="cap-trim-start"></div>
         </div>
-        <div class="cut-preview-cap" id="cap-intro"></div>
       </div>
     </div>
+
+    <div class="cut-group splice-only" id="group-trim">
+      <div class="cut-group-tag">Video 1 · end</div>
+      <div class="row" id="trim-row">
+        <div style="flex:1">
+          <label>Cut from end of first video</label>
+          <div class="desc">Everything after this point is dropped — use it to remove CSP's built-in final flash so it doesn't show up mid-splice.</div>
+        </div>
+        <div class="stepper">
+          <button class="step-btn" type="button" data-target="trim" data-dir="-1" aria-label="step back">◀</button>
+          <span class="step-val" id="val-trim">2.00s</span>
+          <button class="step-btn" type="button" data-target="trim" data-dir="1" aria-label="step forward">▶</button>
+          <input type="hidden" id="trim" max="30" value="2">
+        </div>
+      </div>
+      <div class="cut-preview" id="preview-trim">
+        <button class="cut-preview-toggle" type="button" data-pv="trim"></button>
+        <div class="cut-preview-body">
+          <div class="cut-frames">
+            <div class="cut-frame"><div class="fimg"><img id="img-trim-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
+            <div class="cut-frame is-cut"><div class="fimg"><img id="img-trim" alt=""></div><span class="cut-frame-label">first cut frame</span></div>
+            <div class="cut-frame"><div class="fimg"><img id="img-trim-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+          </div>
+          <div class="cut-preview-cap" id="cap-trim"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cut-group splice-only" id="group-intro">
+      <div class="cut-group-tag">Video 2 · start</div>
+      <div class="row" id="intro-row">
+        <div style="flex:1">
+          <label>Move start of second video to intro</label>
+          <div class="desc" id="intro-desc">Takes this much off the front of video 2 and plays it first, as a brief look at the finished art.</div>
+        </div>
+        <div class="stepper">
+          <button class="step-btn" type="button" data-target="intro" data-dir="-1" aria-label="step back">◀</button>
+          <span class="step-val" id="val-intro">0.00s</span>
+          <button class="step-btn" type="button" data-target="intro" data-dir="1" aria-label="step forward">▶</button>
+          <input type="hidden" id="intro" max="30" value="0">
+        </div>
+      </div>
+      <div class="cut-preview" id="preview-intro">
+        <button class="cut-preview-toggle" type="button" data-pv="intro"></button>
+        <div class="cut-preview-body">
+          <div class="cut-frames">
+            <div class="cut-frame"><div class="fimg"><img id="img-intro-prev" alt=""></div><span class="cut-frame-label">−1 frame</span></div>
+            <div class="cut-frame is-cut"><div class="fimg"><img id="img-intro" alt=""></div><span class="cut-frame-label">timelapse resumes</span></div>
+            <div class="cut-frame"><div class="fimg"><img id="img-intro-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
+          </div>
+          <div class="cut-preview-cap" id="cap-intro"></div>
+        </div>
+      </div>
+    </div>
+
+    </div><!-- /cut-groups -->
     <div class="row">
       <div style="flex:1">
         <label for="length">Total timelapse length</label>
@@ -894,7 +934,6 @@
     document.querySelectorAll('.tab').forEach(t => {
       t.classList.toggle('active', t.dataset.tab === tab);
     });
-    if (tab === 'add' && state.file2) removeFile('file2');
     updateModeUI();
     checkReady();
   }
@@ -1032,7 +1071,7 @@
       const t = r.trimStart1;
       if (!collapsedSet.has('trim-start') && cutLast.start !== t) { cutLast.start = t; requestTriframe(state.prev1, 'trim-start', t); }
       $('cap-trim-start').textContent =
-        `Kept from ${t.toFixed(2)}s — the middle frame is the first one kept; everything before it is removed.`;
+        `The video now starts at ${t.toFixed(2)}s. The middle frame is the first frame you keep — everything before it is cut.`;
     } else {
       showCutPreview('trim-start', false);
       cutLast.start = null;
@@ -1044,7 +1083,7 @@
       showCutPreview('trim', true);
       if (!collapsedSet.has('trim') && cutLast.end !== t) { cutLast.end = t; requestTriframe(state.prev1, 'trim', t); }
       $('cap-trim').textContent =
-        `Cut at ${t.toFixed(2)}s — the middle frame and everything after it is removed. Scrub until the flash's first frame is the middle one.`;
+        `Video 1 now ends at ${t.toFixed(2)}s. The middle frame is the first frame removed — step with ◀ ▶ until it lands on the flash's first frame.`;
     } else {
       showCutPreview('trim', false);
       cutLast.end = null;
@@ -1056,7 +1095,7 @@
       showCutPreview('intro', true);
       if (!collapsedSet.has('intro') && cutLast.intro !== t) { cutLast.intro = t; requestTriframe(state.prev2, 'intro', t); }
       $('cap-intro').textContent =
-        `First ${t.toFixed(2)}s becomes the intro; the main timelapse resumes from the middle frame.`;
+        `The first ${t.toFixed(2)}s of video 2 plays as the intro. The middle frame is where the timelapse picks up again afterwards.`;
     } else {
       showCutPreview('intro', false);
       cutLast.intro = null;
@@ -1394,7 +1433,7 @@
 
   const SUBTEXT = {
     splice: "Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join.",
-    add: 'Add a clean flash and a final hold to a timelapse that does not already have a built-in flash.',
+    add: 'Work on one video: trim it, change its length, and add a clean flash and final hold at the end.',
     images: 'Turn a folder of image frames into a timelapse video. Set the length and optionally drop exact-duplicate frames.',
     trim: 'Cut a single video down to just the part you want — scrub to find the exact in and out frames.',
   };
@@ -1420,6 +1459,7 @@
     $('sub-text').textContent = SUBTEXT[tab] || SUBTEXT.splice;
     $('card1-title').textContent = splice ? 'First video (e.g. Clip Studio Paint)' : 'Video';
     $('trim-start-target').textContent = splice ? 'first video' : 'video';
+    $('tag-trim-start').textContent = splice ? 'Video 1 · start' : 'Video · start';
     syncStepperLabels();
     updateLengthDesc();
     updateCutPreviews();
@@ -1500,9 +1540,9 @@
 
     if (r.hasSecond && r.intro2 > 0) {
       const introDisplayed = r.intro2 * r.speed2;
-      $('intro-desc').textContent = `${r.intro2.toFixed(1)}s of video 2 → ${introDisplayed.toFixed(1)}s intro at the start`;
+      $('intro-desc').textContent = `First ${r.intro2.toFixed(1)}s of video 2 moves to the front as a ${introDisplayed.toFixed(1)}s intro, then the timelapse plays from there.`;
     } else {
-      $('intro-desc').textContent = 'Shows the finished art briefly at the start, then plays the timelapse';
+      $('intro-desc').textContent = 'Takes this much off the front of video 2 and plays it first, as a brief look at the finished art.';
     }
   }
 
@@ -1586,7 +1626,7 @@
       }
     } else if (state.tab === 'add') {
       go.disabled = !state.file1;
-      go.textContent = state.file1 ? 'Add flash & hold' : 'Choose a video';
+      go.textContent = state.file1 ? 'Process video' : 'Choose a video';
     } else if (state.tab === 'images') {
       const n = state.images.length;
       go.disabled = n < 2;
