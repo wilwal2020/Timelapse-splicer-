@@ -241,6 +241,7 @@
   }
   .checkbox-row input { accent-color: var(--accent); }
   .checkbox-row label { font-size: 14px; cursor: pointer; }
+  .checkbox-row input:disabled + label { opacity: 0.45; cursor: not-allowed; }
   button.primary {
     width: 100%;
     background: var(--accent);
@@ -497,11 +498,89 @@
     color: var(--text);
   }
   .edit-scrub-row { display: flex; align-items: center; gap: 10px; }
-  #edit-scrub {
+  /* Timeline: kept footage is blue, removed footage is red-striped */
+  .edit-timeline {
     flex: 1;
-    accent-color: var(--accent);
-    height: 22px;
+    position: relative;
+    height: 34px;
+    background: rgba(107, 138, 253, 0.32);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    touch-action: none;
   }
+  .edit-timeline:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tl-seg {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+  }
+  .tl-removed {
+    background: repeating-linear-gradient(135deg,
+      rgba(248, 113, 113, 0.55) 0 6px, rgba(248, 113, 113, 0.22) 6px 12px);
+  }
+  .tl-pending {
+    background: rgba(255, 255, 255, 0.18);
+    border-left: 2px dashed var(--danger);
+  }
+  .tl-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    margin-left: -1px;
+    background: #fff;
+    box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+  }
+  .cut-out-group { border-left-color: var(--danger); }
+  .cut-out-group .cut-group-tag { color: var(--danger); }
+  .cut-group .row + .cut-preview-cap { margin-top: 8px; }
+  .cut-preview-cap a { color: var(--accent); cursor: pointer; }
+  .edit-cuts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .edit-cuts:empty { display: none; }
+  .edit-cut {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px 5px 10px;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .edit-cut .cut-go {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    padding: 2px 0;
+  }
+  .edit-cut .cut-go:hover { color: var(--accent-hover); }
+  .edit-cut .cut-len { color: var(--text-dim); }
+  .edit-cut .cut-x {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 15px;
+    line-height: 1;
+    padding: 0;
+    font-family: inherit;
+  }
+  .edit-cut .cut-x:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .mark-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .mark-btn:disabled:hover { border-color: var(--border); }
+  .mark-btn:disabled:active { background: var(--surface-2); color: var(--text); }
   .edit-pos {
     text-align: center;
     font-size: 13px;
@@ -559,7 +638,7 @@
     <button class="tab active" data-tab="splice" type="button">Splice two videos</button>
     <button class="tab" data-tab="add" type="button">Single video</button>
     <button class="tab" data-tab="images" type="button">Images → video</button>
-    <button class="tab" data-tab="trim" type="button">Trim video</button>
+    <button class="tab" data-tab="trim" type="button">Trim &amp; cut</button>
   </div>
 
   <div class="layout">
@@ -775,10 +854,13 @@
     </div>
   </div>
   <div class="card" data-tabs="trim" id="edit-controls" style="display:none">
-    <h2><span class="step">2</span>Choose the part to keep</h2>
+    <h2><span class="step">2</span>Trim &amp; cut out parts</h2>
     <div class="edit-scrub-row">
       <button class="step-btn" type="button" id="edit-back" aria-label="step back">◀</button>
-      <input type="range" id="edit-scrub" min="0" max="1000" value="0" step="1">
+      <div class="edit-timeline" id="edit-timeline" role="slider" tabindex="0" aria-label="Playhead" aria-valuemin="0">
+        <div id="edit-tl-segs"></div>
+        <div class="tl-playhead" id="edit-tl-head"></div>
+      </div>
       <button class="step-btn" type="button" id="edit-fwd" aria-label="step forward">▶</button>
     </div>
     <div class="edit-pos" id="edit-pos">0.00s</div>
@@ -787,14 +869,28 @@
       <div class="cut-frame is-cut"><div class="fimg"><img id="img-edit" alt=""></div><span class="cut-frame-label">playhead</span></div>
       <div class="cut-frame"><div class="fimg"><img id="img-edit-next" alt=""></div><span class="cut-frame-label">+1 frame</span></div>
     </div>
-    <div class="row" style="margin-top:14px">
-      <button class="mark-btn" type="button" id="edit-set-start">Set start here</button>
-      <button class="mark-btn" type="button" id="edit-set-end">Set end here</button>
+    <div class="cut-groups" style="margin:16px 0 0">
+      <div class="cut-group">
+        <div class="cut-group-tag">Keep range</div>
+        <div class="row">
+          <button class="mark-btn" type="button" id="edit-set-start">Set start here</button>
+          <button class="mark-btn" type="button" id="edit-set-end">Set end here</button>
+        </div>
+        <div class="cut-preview-cap" id="edit-range-cap"></div>
+      </div>
+      <div class="cut-group cut-out-group">
+        <div class="cut-group-tag">Cut out sections</div>
+        <div class="row">
+          <button class="mark-btn" type="button" id="edit-cut-from">Start cut here</button>
+          <button class="mark-btn" type="button" id="edit-cut-to" disabled>End cut here</button>
+        </div>
+        <div class="cut-preview-cap" id="edit-cut-cap"></div>
+        <div class="edit-cuts" id="edit-cut-list"></div>
+      </div>
     </div>
-    <div class="cut-preview-cap" id="edit-range-cap" style="margin-top:10px"></div>
     <div class="checkbox-row">
       <input type="checkbox" id="fast-trim">
-      <label for="fast-trim">Fast trim — no re-encode (the start snaps back to the nearest keyframe)</label>
+      <label for="fast-trim">Fast trim — no re-encode (the start snaps back to the nearest keyframe; not used when you cut out sections)</label>
     </div>
   </div>
 
@@ -848,7 +944,7 @@
   const state = {
     file1: null, file2: null, duration1: 0, duration2: 0, tab: 'splice', totalDirty: false, prev1: null, prev2: null,
     images: [],
-    editFile: null, editDur: 0, editPrev: null, editPos: 0, editIn: 0, editOut: 0,
+    editFile: null, editDur: 0, editPrev: null, editPos: 0, editIn: 0, editOut: 0, editCuts: [], editMark: null,
   };
   const $ = id => document.getElementById(id);
 
@@ -1221,15 +1317,19 @@
     $('remove-images').addEventListener('click', e => { e.stopPropagation(); clearImages(); });
   })();
 
-  // ---------- Trim video ----------
-  const EDIT_RANGE = 1000;
+  // ---------- Trim & cut video ----------
+  // Model: a keep range [editIn, editOut] minus any number of removed
+  // sections in editCuts ([a, b] pairs, sorted, non-overlapping). A cut
+  // [a, b] drops frames from a up to b, so the frame at b is kept again.
   let editLast = null;
   function setEditPos(t) {
     if (!state.editDur) return;
     t = Math.max(0, Math.min(t, state.editDur));
     state.editPos = t;
     $('edit-pos').textContent = t.toFixed(2) + 's / ' + state.editDur.toFixed(2) + 's';
-    $('edit-scrub').value = Math.round(t / state.editDur * EDIT_RANGE) || 0;
+    $('edit-timeline').setAttribute('aria-valuemax', state.editDur.toFixed(2));
+    $('edit-timeline').setAttribute('aria-valuenow', t.toFixed(2));
+    renderEditTimeline();
     if (state.editPrev && editLast !== t) {
       editLast = t;
       state.editPrev.request('edit-prev', t - FRAME, $('img-edit-prev'));
@@ -1238,15 +1338,88 @@
     }
   }
   function nudgeEdit(frames) { setEditPos(state.editPos + frames * FRAME); }
+
+  // The pieces that make it into the output, in order.
+  function editKeptSegments() {
+    let segs = [[state.editIn, state.editOut]];
+    for (const [a, b] of state.editCuts) {
+      const next = [];
+      for (const [s, e] of segs) {
+        if (b <= s || a >= e) { next.push([s, e]); continue; }
+        if (a > s) next.push([s, a]);
+        if (b < e) next.push([b, e]);
+      }
+      segs = next;
+    }
+    return segs.filter(([s, e]) => e - s >= 0.02);
+  }
+
+  function renderEditTimeline() {
+    const dur = state.editDur;
+    if (!dur) return;
+    const pct = t => (Math.max(0, Math.min(t, dur)) / dur * 100) + '%';
+    const block = (cls, a, b) =>
+      `<div class="tl-seg ${cls}" style="left:${pct(a)};width:calc(${pct(b)} - ${pct(a)})"></div>`;
+    // everything that isn't kept is drawn as removed
+    let html = '', cursor = 0;
+    for (const [s, e] of editKeptSegments()) {
+      if (s > cursor) html += block('tl-removed', cursor, s);
+      cursor = e;
+    }
+    if (cursor < dur) html += block('tl-removed', cursor, dur);
+    if (state.editMark != null) {
+      const a = Math.min(state.editMark, state.editPos), b = Math.max(state.editMark, state.editPos);
+      html += block('tl-pending', a, Math.max(b, a + dur * 0.002));
+    }
+    $('edit-tl-segs').innerHTML = html;
+    $('edit-tl-head').style.left = pct(state.editPos);
+  }
+
   function renderEditRange() {
     const len = Math.max(0, state.editOut - state.editIn);
     $('edit-range-cap').textContent =
-      `Keeping ${state.editIn.toFixed(2)}s → ${state.editOut.toFixed(2)}s  (${len.toFixed(2)}s long). Scrub + ◀▶ to a frame, then “Set start” / “Set end”.`;
+      `Keeping ${state.editIn.toFixed(2)}s → ${state.editOut.toFixed(2)}s (${len.toFixed(2)}s). Scrub + ◀▶ to a frame, then “Set start” / “Set end”.`;
+
+    const segs = editKeptSegments();
+    const outLen = segs.reduce((s, [a, b]) => s + b - a, 0);
+    const cap = $('edit-cut-cap');
+    if (state.editMark != null) {
+      cap.innerHTML = `Cut starts at <b>${state.editMark.toFixed(2)}s</b>. Move to the first frame you want back, then press “End cut here”. <a id="edit-cut-cancel">Cancel</a>`;
+      $('edit-cut-cancel').addEventListener('click', () => { state.editMark = null; renderEditRange(); });
+    } else if (!state.editCuts.length) {
+      cap.textContent = 'Remove a section from the middle: scrub to its first frame, “Start cut here”, then scrub to where the video should resume and “End cut here”.';
+    } else {
+      cap.textContent = `Final video: ${outLen.toFixed(2)}s, joined from ${segs.length} piece${segs.length === 1 ? '' : 's'}. Click a cut to jump to it.`;
+    }
+    $('edit-cut-to').disabled = state.editMark == null;
+    $('fast-trim').disabled = segs.length > 1;
+
+    $('edit-cut-list').innerHTML = state.editCuts.map(([a, b], i) =>
+      `<div class="edit-cut"><button class="cut-go" type="button" data-i="${i}">Cut ${a.toFixed(2)}s → ${b.toFixed(2)}s <span class="cut-len">· ${(b - a).toFixed(2)}s removed</span></button>` +
+      `<button class="cut-x" type="button" data-i="${i}" title="Remove this cut (put the footage back)">×</button></div>`
+    ).join('');
+    renderEditTimeline();
   }
+
+  function addEditCut(a, b) {
+    if (b - a < FRAME / 2) return false;
+    // merge with any cuts it overlaps or touches
+    const cuts = [...state.editCuts, [a, b]].sort((x, y) => x[0] - y[0]);
+    const merged = [];
+    for (const c of cuts) {
+      const last = merged[merged.length - 1];
+      if (last && c[0] <= last[1]) last[1] = Math.max(last[1], c[1]);
+      else merged.push([c[0], c[1]]);
+    }
+    state.editCuts = merged;
+    return true;
+  }
+
   function loadEditVideo(file) {
     if (state.editPrev) state.editPrev.destroy();
     state.editFile = file;
     state.editPrev = createPreviewer(file);
+    state.editCuts = []; state.editMark = null;
     editLast = null;
     $('drop-edit').classList.add('loaded');
     const url = URL.createObjectURL(file);
@@ -1267,6 +1440,7 @@
   function clearEditVideo() {
     if (state.editPrev) { state.editPrev.destroy(); state.editPrev = null; }
     state.editFile = null; state.editDur = 0; state.editIn = 0; state.editOut = 0; state.editPos = 0;
+    state.editCuts = []; state.editMark = null;
     editLast = null;
     $('file-edit').value = '';
     $('drop-edit').classList.remove('loaded');
@@ -1282,10 +1456,33 @@
     drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) loadEditVideo(e.dataTransfer.files[0]); });
     input.addEventListener('change', e => { if (e.target.files[0]) loadEditVideo(e.target.files[0]); });
     $('remove-edit').addEventListener('click', e => { e.stopPropagation(); clearEditVideo(); });
-    $('edit-scrub').addEventListener('input', () => {
+
+    // click / drag anywhere on the timeline to move the playhead
+    const tl = $('edit-timeline');
+    let dragging = false;
+    const seekFromPointer = e => {
+      const r = tl.getBoundingClientRect();
+      setEditPos((e.clientX - r.left) / r.width * state.editDur);
+    };
+    tl.addEventListener('pointerdown', e => {
       if (!state.editDur) return;
-      setEditPos(parseInt($('edit-scrub').value, 10) / EDIT_RANGE * state.editDur);
+      dragging = true;
+      try { tl.setPointerCapture(e.pointerId); } catch {}
+      seekFromPointer(e);
     });
+    tl.addEventListener('pointermove', e => { if (dragging) seekFromPointer(e); });
+    ['pointerup', 'pointercancel'].forEach(ev => tl.addEventListener(ev, () => { dragging = false; }));
+    tl.addEventListener('keydown', e => {
+      if (!state.editDur) return;
+      const step = e.shiftKey ? 30 : 1;
+      if (e.key === 'ArrowLeft') nudgeEdit(-step);
+      else if (e.key === 'ArrowRight') nudgeEdit(step);
+      else if (e.key === 'Home') setEditPos(0);
+      else if (e.key === 'End') setEditPos(state.editDur);
+      else return;
+      e.preventDefault();
+    });
+
     attachHold($('edit-back'), mult => nudgeEdit(-mult));
     attachHold($('edit-fwd'), mult => nudgeEdit(mult));
     $('edit-set-start').addEventListener('click', () => {
@@ -1297,6 +1494,31 @@
       state.editOut = state.editPos;
       if (state.editIn >= state.editOut) state.editIn = Math.max(0, state.editOut - 0.1);
       renderEditRange(); checkReady();
+    });
+    $('edit-cut-from').addEventListener('click', () => {
+      state.editMark = state.editPos;
+      renderEditRange();
+    });
+    $('edit-cut-to').addEventListener('click', () => {
+      if (state.editMark == null) return;
+      const a = Math.min(state.editMark, state.editPos), b = Math.max(state.editMark, state.editPos);
+      if (!addEditCut(a, b)) {
+        $('edit-cut-cap').textContent = 'That cut is empty — move the playhead to a different frame first.';
+        return;
+      }
+      state.editMark = null;
+      renderEditRange(); checkReady();
+    });
+    $('edit-cut-list').addEventListener('click', e => {
+      const btn = e.target.closest('button[data-i]');
+      if (!btn) return;
+      const i = parseInt(btn.dataset.i, 10);
+      if (btn.classList.contains('cut-x')) {
+        state.editCuts.splice(i, 1);
+        renderEditRange(); checkReady();
+      } else {
+        setEditPos(state.editCuts[i][0]);
+      }
     });
   })();
 
@@ -1394,17 +1616,27 @@
   }
 
   async function runTrim() {
-    const inT = state.editIn, outT = state.editOut;
-    const len = Math.max(0.05, outT - inT);
-    const fast = $('fast-trim').checked;
+    const segs = editKeptSegments();
+    if (!segs.length) throw new Error('Nothing left to keep — remove a cut or widen the keep range.');
+    const multi = segs.length > 1;
+    const fast = !multi && $('fast-trim').checked;
+    const outLen = segs.reduce((s, [a, b]) => s + b - a, 0);
     defineSteps([
       { label: 'Reading video', weight: 0.5 },
-      { label: 'Cutting clip', weight: fast ? 0.3 : Math.max(1, len * 0.5) },
+      { label: multi ? `Cutting & joining ${segs.length} pieces` : 'Cutting clip', weight: fast ? 0.3 : Math.max(1, outLen * 0.5) },
     ]);
     setProgress('Processing…');
     nextStep();
     ffmpeg.FS('writeFile', 'edit_in.mp4', await fetchFile(state.editFile));
     nextStep();
+    if (multi) {
+      await runCutPieces(segs);
+      finishOutput('edited.mp4');
+      ['edit_in.mp4', 'out.mp4'].forEach(f => { try { ffmpeg.FS('unlink', f); } catch {} });
+      return;
+    }
+    const [inT, outT] = segs[0];
+    const len = Math.max(0.05, outT - inT);
     if (fast) {
       // stream copy: near-instant, but the start snaps to the keyframe at
       // or before the chosen frame
@@ -1429,13 +1661,26 @@
     ['edit_in.mp4', 'out.mp4'].forEach(f => { try { ffmpeg.FS('unlink', f); } catch {} });
   }
 
+  // Join several kept pieces of edit_in.mp4 into out.mp4: one decode, split
+  // into a trim per piece, concatenated back together and encoded once.
+  // Always re-encodes — a stream copy can only start a piece on a keyframe,
+  // which can drag cut-out footage back in when keyframes are far apart.
+  async function runCutPieces(segs) {
+    const n = segs.length;
+    const fc =
+      `[0:v]split=${n}${segs.map((_, i) => `[s${i}]`).join('')};` +
+      segs.map(([a, b], i) => `[s${i}]trim=start=${a.toFixed(3)}:end=${b.toFixed(3)},setpts=PTS-STARTPTS[v${i}];`).join('') +
+      `${segs.map((_, i) => `[v${i}]`).join('')}concat=n=${n}:v=1:a=0[out]`;
+    await ffmpeg.run('-i', 'edit_in.mp4', '-filter_complex', fc, '-map', '[out]', '-an', ...ENC, 'out.mp4');
+  }
+
   $('skip-finish').addEventListener('change', () => { updateModeUI(); checkReady(); });
 
   const SUBTEXT = {
     splice: "Splice a Clip Studio Paint timelapse with another, trimming CSP's built-in flash before the join.",
     add: 'Work on one video: trim it, change its length, and add a clean flash and final hold at the end.',
     images: 'Turn a folder of image frames into a timelapse video. Set the length and optionally drop exact-duplicate frames.',
-    trim: 'Cut a single video down to just the part you want — scrub to find the exact in and out frames.',
+    trim: "Trim a video and cut out any parts you don't want — scrub to the exact frames, then mark what to keep and what to remove.",
   };
 
   function updateModeUI() {
@@ -1632,10 +1877,11 @@
       go.disabled = n < 2;
       go.textContent = n >= 2 ? `Make timelapse from ${n} images` : 'Choose at least 2 images';
     } else if (state.tab === 'trim') {
-      const ready = state.editFile && state.editOut > state.editIn;
-      go.disabled = !ready;
+      const segs = state.editFile ? editKeptSegments() : [];
+      go.disabled = !segs.length;
       go.textContent = !state.editFile ? 'Choose a video'
-        : (state.editOut > state.editIn ? 'Export trimmed clip' : 'Set a start and end');
+        : !segs.length ? 'Nothing left to keep'
+        : state.editCuts.length ? 'Export edited video' : 'Export trimmed clip';
     }
   }
 
